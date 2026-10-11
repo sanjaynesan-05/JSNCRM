@@ -1,0 +1,161 @@
+:root {
+  --brand-black: #000;
+  --brand-white: #fff;
+  --brand-gold: #d4af37;
+  --brand-dark: #1a1a1a;
+  --brand-gray: #6b6b6b;
+  --brand-light: #f5f5f5;
+  --ink: var(--brand-dark);
+  --muted: var(--brand-gray);
+  --line: #e4e4e4;
+  --paper: var(--brand-white);
+  --cream: var(--brand-light);
+  --green: var(--brand-black);
+  --green-light: var(--brand-light);
+  color: var(--brand-dark);
+  background: var(--brand-white);
+  font-family: "Proxima Nova", Arial, Helvetica, sans-serif;
+}
+
+*, *::before, *::after { font-family: inherit; }
+body { color: var(--brand-dark); background: var(--brand-white); }
+button, input, textarea, select { font-family: "Proxima Nova", Arial, Helvetica, sans-serif; }
+a { color: var(--brand-black); text-underline-offset: 3px; }
+::selection { color: var(--brand-black); background: #f0df9e; }
+:focus-visible { outline: 2px solid var(--brand-gold); outline-offset: 3px; }
+
+.app-shell { background: var(--brand-light); }
+.business-shell { --sidebar-width: 252px; color: var(--brand-dark); background: var(--brand-white); }
+.business-sidebar { background: var(--brand-black); color: var(--brand-white); padding: 25px 16px 18px; }
+.sidebar-brand { color: var(--brand-white); border-bottom: 1px solid #333; margin-bottom: 12px; padding: 4px 8px 23px; letter-spacing: 1.4px; }
+.sidebar-brand img { width: 46px; height: 38px; padding: 2px; border-radius: 0; background: var(--brand-white); }
+.sidebar-brand b { color: var(--brand-gold); font-size: 10px; letter-spacing: 1.7px; }
+.nav-caption { color: #b5b5b5; font: 600 10px "Proxima Nova", Arial, sans-serif; letter-spacing: 1.8px; }
+.business-sidebar nav { gap: 3px; }
+.nav-link { position: relative; min-height: 42px; border-radius: 2px; color: #dedede; padding: 10px 12px; font-size: 13px; }
+.nav-link:hover { color: var(--brand-white); background: #1b1b1b; }
+.nav-link.selected { color: var(--brand-white); background: #1a1a1a; box-shadow: inset 2px 0 var(--brand-gold); }
+.nav-link.selected svg { color: var(--brand-gold); }
+.sidebar-bottom { color: #c3c3c3; border-color: #333; }
+.local-indicator { background: var(--brand-gold); box-shadow: 0 0 0 3px #d4af372e; }
+.business-main { background: var(--brand-white); }
+.business-topbar { height: 66px; padding-inline: clamp(16px, 3vw, 42px); border-color: var(--line); background: rgba(255,255,255,.97); }
+.collapse-control, .mobile-menu, .mobile-close { color: var(--brand-dark); border-radius: 2px; }
+.collapse-control:hover, .mobile-menu:hover, .mobile-close:hover { background: var(--brand-light); }
+.topbar-context { color: var(--brand-gray); font-size: 12px; }
+.topbar-context span { color: var(--brand-black); font-weight: 700; }
+.secure-local { color: var(--brand-dark); background: var(--brand-white); border: 1px solid var(--brand-gold); border-radius: 2px; font: 650 10px "Proxima Nova", Arial, sans-serif; letter-spacing: 1.2px; }
+.business-content { max-width: 1480px; padding: clamp(26px, 4vw, 52px) clamp(18px, 4vw, 58px) 76px; }
+.business-page-heading { margin-bottom: 30px; padding-bottom: 18px; border-bottom: 1px solid var(--brand-gold); }
+.business-eyebrow { color: var(--brand-gray); font: 600 10px "Proxima Nova", Arial, sans-serif; letter-spacing: 1.7px; }
+.business-page-heading h1 { color: var(--brand-black); font-size: clamp(28px, 3vw, 38px); font-weight: 700; letter-spacing: -.7px; margin: 8px 0 5px; }
+.business-page-heading p { color: var(--brand-gray); font-size: 14px; }
+.metric-grid { gap: 14px; }
+.metric-card, .business-panel, .panel, .invoice-modal, .invoice-detail { background: var(--brand-white); border: 1px solid var(--line); border-radius: 2px; box-shadow: 0 3px 16px #00000008; }
+.metric-card { position: relative; gap: 17px; padding: 20px 21px; }
+.metric-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--brand-gold); }
+.metric-card span, .metric-card small { color: var(--brand-gray); font-size: 12px; }
+.metric-card strong { color: var(--brand-black); font-size: 28px; font-weight: 650; letter-spacing: -.4px; }
+.business-panel { padding: 24px; margin-bottom: 16px; }
+.business-panel h2, .empty-state h2 { color: var(--brand-black); font-size: 17px; font-weight: 650; }
+.business-panel p { color: var(--brand-gray); font-size: 13px; }
+.business-panel code { color: var(--brand-dark); }
+.record-list li { border-color: var(--line); color: var(--brand-dark); font-size: 13px; }
+.record-list li svg { color: #9a7b1c; }
+.page-toolbar { color: var(--brand-gray); gap: 12px; }
+.studio-button, .secondary-button, .small-button, .icon-button, .mini-icon { min-height: 38px; border-radius: 2px; font-size: 12px; transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease; }
+.studio-button { border-color: var(--brand-black); background: var(--brand-black); color: var(--brand-white); }
+.studio-button:hover:not(:disabled) { border-color: #333; background: #242424; }
+.secondary-button { border-color: #cfcfcf; background: var(--brand-white); color: var(--brand-dark); }
+.secondary-button:hover:not(:disabled) { border-color: var(--brand-gold); background: var(--brand-light); color: var(--brand-black); }
+.small-button { border-color: #c8ae56; background: #fffdf6; color: var(--brand-dark); }
+.small-button:hover { border-color: var(--brand-gold); background: #f8f1d9; }
+.icon-button, .mini-icon { color: var(--brand-dark); border-color: #d6d6d6; background: var(--brand-white); }
+.icon-button:hover, .mini-icon:hover { border-color: var(--brand-gold); background: var(--brand-light); color: var(--brand-black); }
+.empty-state { border-color: #d4d4d4; border-radius: 2px; color: var(--brand-gray); }
+.empty-icon, .panel-icon { border-radius: 2px; color: var(--brand-dark); background: var(--brand-light); }
+.empty-icon svg, .panel-icon svg { color: #9a7b1c; }
+.client-form label, .client-contact-grid dt, .invoice-toolbar label, .invoice-form-grid label, .invoice-payment-form label { color: var(--brand-gray); }
+.client-form input, .client-form textarea, input, textarea, select { accent-color: var(--brand-black); }
+.client-form input, .client-form textarea, .invoice-toolbar input, .invoice-toolbar select, .invoice-source-grid select, .invoice-form-grid input, .invoice-form-grid select, .invoice-form-grid textarea, .invoice-item-edit input, .invoice-payment-form input, .invoice-payment-form textarea { border-color: #d7d7d7; border-radius: 2px; color: var(--brand-dark); background: var(--brand-white); }
+input:focus, textarea:focus, select:focus { border-color: var(--brand-gold) !important; outline: 2px solid #d4af3738; outline-offset: 1px; box-shadow: none !important; }
+input::placeholder, textarea::placeholder { color: #777; }
+.records-table { color: var(--brand-dark); font-size: 13px; }
+.records-table th { background: var(--brand-light); color: var(--brand-gray); font-size: 10px; letter-spacing: .8px; }
+.records-table td, .records-table th { border-color: var(--line); padding: 14px 16px; }
+.records-table td { color: var(--brand-dark); }
+.records-table tbody tr:hover { background: #fcfaf2; }
+.record-status { background: var(--brand-light); color: var(--brand-dark); border: 1px solid #e4e4e4; }
+.table-wrap { border: 1px solid var(--line); }
+.client-list-item { border-radius: 2px; color: var(--brand-dark); }
+.client-list-item:hover, .client-list-item.selected { background: var(--brand-light); box-shadow: inset 2px 0 var(--brand-gold); }
+.client-list-item small, .client-balance small, .client-contact-grid dt { color: var(--brand-gray); }
+.client-balance { border-radius: 2px; background: var(--brand-light); }
+.client-notes, .client-related, .client-related li + li { border-color: var(--line); }
+.client-related h3, .client-notes h3 { color: var(--brand-black); }
+.record-link:hover { background: #fcfaf2; }
+.invoice-row { border-color: var(--line); }
+.invoice-status { border-radius: 2px; background: var(--brand-light); color: var(--brand-dark); }
+.status-overdue, .status-void { background: #f8e9e7; color: #7b2d24; }
+.status-paid { background: #edf4ed; color: #31583a; }
+.invoice-dashboard-link { text-align: left; cursor: pointer; }
+.invoice-dashboard-link:hover { border-color: var(--brand-gold); }
+.invoice-detail-table { border-color: var(--line); }
+.invoice-detail-table > div { border-color: var(--line); }
+.project-requirements, .workflow-empty, .client-detail-placeholder { color: var(--brand-gray); }
+.priority-tag { border-radius: 2px; }
+.email-content { background: transparent; }
+.email-content .app-shell { background: var(--brand-light); }
+.email-content .topbar { border-color: var(--line); background: var(--brand-white); box-shadow: none; backdrop-filter: none; }
+.email-content .brand-divider { background: var(--brand-gold); }
+.email-content .brand-name { color: var(--brand-black); font-family: "Proxima Nova", Arial, sans-serif; }
+.email-content .brand-subtitle, .email-content .connection { color: var(--brand-gray); }
+.email-content .status-dot { background: var(--brand-gold); box-shadow: 0 0 0 3px #d4af3730; }
+.email-content .status-dot.offline { background: #777; box-shadow: 0 0 0 3px #7772; }
+.email-content .account-link { color: var(--brand-black); }
+.email-content .workspace { max-width: 1540px; gap: 32px; }
+.email-content .panel { padding: 22px; border-radius: 2px; }
+.email-content .section-heading h1, .email-content .preview-header h2 { color: var(--brand-black); }
+.email-content .eyebrow { color: var(--brand-gray); }
+.email-content .field-label, .email-content .field label { color: var(--brand-gray); }
+.email-content .field input, .email-content .field textarea, .email-content .field select { background: var(--brand-white); border-color: #d7d7d7; color: var(--brand-dark); border-radius: 2px; }
+.email-content .block-editor, .email-content .spreadsheet-editor { background: var(--brand-light); border-color: var(--line); border-radius: 2px; }
+.email-content .spreadsheet-table td { border-color: #d7d7d7; }
+.email-content .spreadsheet-table td.spreadsheet-selected { background: #fbf6e5; box-shadow: inset 0 0 0 2px var(--brand-gold); }
+.email-content .spreadsheet-table input:focus { box-shadow: inset 0 0 0 2px var(--brand-gold); background: var(--brand-white); }
+.email-content .text-button { color: var(--brand-gray); }
+.email-content .text-button:hover { color: var(--brand-black); }
+.email-content .preview-canvas { border-color: var(--line); }
+
+.brand-intro { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: var(--brand-white); pointer-events: none; animation: brand-intro-out 1.35s ease 0s 1 both; }
+.brand-intro img { display: block; width: min(210px, 54vw); height: auto; object-fit: contain; animation: brand-logo-in .8s cubic-bezier(.2,.7,.2,1) both; }
+.brand-intro span { display: block; width: min(150px, 38vw); height: 1px; background: var(--brand-gold); transform-origin: center; animation: brand-rule-in .5s ease .45s both; }
+@keyframes brand-logo-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+@keyframes brand-rule-in { from { opacity: 0; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
+@keyframes brand-intro-out { 0%, 68% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; } }
+
+@media (max-width: 760px) {
+  .business-content { padding: 24px 16px 50px; }
+  .business-page-heading { align-items: flex-start; }
+  .business-panel { padding: 18px; }
+  .email-content .workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 26px; }
+  .email-content .editor-column, .email-content .preview-column { min-width: 0; }
+  .email-content .topbar { padding-inline: 16px; }
+  .email-content .connection-label { max-width: 120px; }
+}
+@media (max-width: 480px) {
+  .business-content { padding-inline: 12px; }
+  .business-page-heading h1 { font-size: 28px; }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-card { padding: 16px 14px; }
+  .metric-card strong { font-size: 23px; overflow-wrap: anywhere; }
+  .email-content .topbar { gap: 9px; padding-inline: 12px; }
+  .email-content .brand-logo { width: 42px; }
+  .email-content .brand-name { font-size: 10px; letter-spacing: 1.4px; }
+  .email-content .brand-subtitle { font-size: 9px; }
+  .email-content .connection-label { max-width: 92px; font-size: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .brand-intro { display: none; }
+}

@@ -18,7 +18,7 @@ const richText = (value: string) =>
       if (closing) return name === 'font' ? '</span>' : `</${name}>`;
       if (name === 'a') {
         const href = inside.match(/href\s*=\s*["'](https?:\/\/[^"']+)["']/i)?.[1];
-        return href ? `<a href="${escapeHtml(href)}" style="color:#1c5148;text-decoration:underline;">` : '';
+        return href ? `<a href="${escapeHtml(href)}" style="color:#000000;text-decoration:underline;">` : '';
       }
       if (name === 'font') {
         const color = inside.match(/color\s*=\s*["'](#[0-9a-f]{3,8})["']/i)?.[1];
@@ -41,7 +41,7 @@ const defaultStyle = (target: string): TypographyStyle => ({
   lineHeight: 1.6,
   letterSpacing: 0,
   textAlign: 'left',
-  color: '#17211e',
+  color: '#1a1a1a',
   backgroundColor: 'transparent',
 });
 
@@ -98,7 +98,7 @@ const renderSection = (section: EmailSection, draft: EmailDraft) => {
 };
 
 export function generateEmailHtml(draft: EmailDraft, logoSrc = ''): string {
-  const accent = '#1c5148';
+  const accent = '#d4af37';
   const titleStyle = styleFor(draft, 'title');
   const bodyStyle = styleFor(draft, 'body');
   const signatureStyle = styleFor(draft, 'signature');
@@ -107,7 +107,7 @@ export function generateEmailHtml(draft: EmailDraft, logoSrc = ''): string {
   // Logo: use provided src (data URL for preview, cid: for email) — never a dark fallback block
   const logo = logoSrc
     ? `<img src="${escapeHtml(logoSrc)}" alt="JSN Designs" width="88" height="auto" style="display:block;width:88px;max-width:88px;height:auto;border:0;margin-bottom:22px;" />`
-    : `<p style="margin:0 0 22px;font-family:Arial,sans-serif;font-size:11px;letter-spacing:3px;color:#1c5148;font-weight:800;">JSN DESIGNS</p>`;
+    : `<p style="margin:0 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:3px;color:#000000;font-weight:800;">JSN DESIGNS</p>`;
 
   const greeting = `<p style="margin:0 0 18px;${css(bodyStyle)}">${text(draft.greeting || 'Hello,')}</p>`;
   const body = draft.body ? `<div style="margin:0 0 18px;${css(bodyStyle)}">${richText(draft.body)}</div>` : '';
@@ -116,8 +116,8 @@ export function generateEmailHtml(draft: EmailDraft, logoSrc = ''): string {
     : '';
 
   // Title color must use the draft's configured color (not hardcoded dark)
-  const titleColor = titleStyle.color && titleStyle.color !== 'transparent' ? titleStyle.color : '#17211e';
+  const titleColor = titleStyle.color && titleStyle.color !== 'transparent' ? titleStyle.color : '#000000';
   const titleBg = titleStyle.backgroundColor && titleStyle.backgroundColor !== 'transparent' ? titleStyle.backgroundColor : '#ffffff';
 
-  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>${escapeHtml(draft.subject || 'Email')}</title></head><body style="margin:0;padding:0;background:#f3f1ec;font-family:Arial,Helvetica,sans-serif;color:#17211e;-webkit-text-size-adjust:100%;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f1ec;padding:32px 16px;"><tr><td align="center"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;background:#ffffff;"><tr><td style="background:${escapeHtml(titleBg)};padding:28px 44px 30px;border-bottom:1px solid #e7ece8;">${logo}<h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:${titleStyle.fontSize}px;font-weight:${titleStyle.fontWeight};color:${escapeHtml(titleColor)};line-height:${titleStyle.lineHeight};letter-spacing:${titleStyle.letterSpacing}px;">${text(draft.title || 'A considered note')}</h1></td></tr><tr><td style="padding:34px 44px 12px;">${greeting}${body}</td></tr>${draft.sections.map((s) => renderSection(s, draft)).join('')}${legacyCta}<tr><td style="padding:4px 44px 34px;border-top:1px solid #e7ece8;"><p style="margin:24px 0 8px;${css(bodyStyle)}">${text(draft.closing)}</p><p style="margin:0;white-space:pre-line;${css(signatureStyle)}">${text(draft.signature)}</p></td></tr></table></td></tr></table></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>${escapeHtml(draft.subject || 'Email')}</title></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;-webkit-text-size-adjust:100%;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f5f5;padding:32px 16px;"><tr><td align="center"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;background:#ffffff;"><tr><td style="background:${escapeHtml(titleBg)};padding:28px 44px 30px;border-bottom:1px solid #d4af37;">${logo}<h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:${titleStyle.fontSize}px;font-weight:${titleStyle.fontWeight};color:${escapeHtml(titleColor)};line-height:${titleStyle.lineHeight};letter-spacing:${titleStyle.letterSpacing}px;">${text(draft.title || 'A considered note')}</h1></td></tr><tr><td style="padding:34px 44px 12px;">${greeting}${body}</td></tr>${draft.sections.map((s) => renderSection(s, draft)).join('')}${legacyCta}<tr><td style="padding:4px 44px 34px;border-top:1px solid #d4af37;"><p style="margin:24px 0 8px;${css(bodyStyle)}">${text(draft.closing)}</p><p style="margin:0;white-space:pre-line;${css(signatureStyle)}">${text(draft.signature)}</p></td></tr></table></td></tr></table></body></html>`;
 }

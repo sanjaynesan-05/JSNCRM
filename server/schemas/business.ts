@@ -87,6 +87,7 @@ export const paymentSchema = z.object({
   payment_method: z.string().trim().max(60).optional(),
   reference: z.string().trim().max(200).optional(),
   notes: optionalText,
+  idempotency_key: z.string().uuid().optional(),
 });
 export const taskSchema = z.object({
   order_id: z.string().uuid().optional().nullable(),
@@ -101,3 +102,37 @@ export const taskSchema = z.object({
 export const taskStatusSchema = z.object({
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
 });
+
+const invoiceItemSchema = z.object({
+  description: z.string().trim().min(1).max(500),
+  quantity: z.number().positive().max(100000),
+  unit_price_minor: z.number().int().nonnegative().max(1_000_000_000),
+  discount_minor: z.number().int().nonnegative().max(1_000_000_000).default(0),
+});
+export const invoiceSchema = z.object({
+  client_id: z.string().uuid(),
+  source_order_id: z.string().uuid().optional().nullable(),
+  source_quotation_id: z.string().uuid().optional().nullable(),
+  reissued_from_id: z.string().uuid().optional().nullable(),
+  title: z.string().trim().min(1).max(200),
+  items: z.array(invoiceItemSchema).min(1).max(100),
+  discount_minor: z.number().int().nonnegative().max(1_000_000_000).default(0),
+  issue_date: z.string().date(),
+  due_date: z.string().date().optional().nullable(),
+  terms: optionalText,
+  notes: optionalText,
+}).superRefine((value, ctx) => {
+  if (value.due_date && value.due_date < value.issue_date)
+    ctx.addIssue({ code: "custom", path: ["due_date"], message: "Due date cannot be before the issue date." });
+  if (value.source_order_id && value.source_quotation_id)
+    ctx.addIssue({ code: "custom", path: ["source_order_id"], message: "Choose either an order or a quotation as the source." });
+});
+export const invoicePaymentSchema = z.object({
+  amount_minor: z.number().int().positive().max(1_000_000_000),
+  payment_date: z.string().date(),
+  payment_method: z.string().trim().max(60).optional(),
+  reference: z.string().trim().max(200).optional(),
+  notes: optionalText,
+  idempotency_key: z.string().uuid(),
+});
+export const invoiceStatusSchema = z.object({ action: z.enum(["issue", "void"]) });

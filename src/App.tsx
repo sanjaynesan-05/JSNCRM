@@ -5,6 +5,7 @@ import {
   CheckSquare,
   ChevronRight,
   FileText,
+  ReceiptText,
   LayoutDashboard,
   Mail,
   Menu,
@@ -17,6 +18,7 @@ import EmailStudio from "./EmailStudio";
 import QuotationsPage from "./pages/QuotationsPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import ClientsPage from "./pages/ClientsPage";
+import InvoicesPage from "./pages/InvoicesPage";
 import BusinessProfileForm from "./components/BusinessProfileForm";
 import logoUrl from "./assets/JSN DESIGN.png";
 
@@ -24,6 +26,7 @@ type Page =
   | "dashboard"
   | "email"
   | "quotations"
+  | "invoices"
   | "orders"
   | "clients"
   | "settings";
@@ -32,6 +35,8 @@ type Stats = {
   open_quotations: number;
   active_orders: number;
   open_tasks: number;
+  open_invoices: number;
+  overdue_invoices: number;
   outstanding_minor: number;
   upcoming_tasks: {
     id: string;
@@ -44,6 +49,7 @@ const nav: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "email", label: "Email Studio", icon: Mail },
   { id: "quotations", label: "Quotations", icon: FileText },
+  { id: "invoices", label: "Invoices", icon: ReceiptText },
   { id: "orders", label: "Orders & Projects", icon: BriefcaseBusiness },
   { id: "clients", label: "Clients", icon: Users },
   { id: "settings", label: "Settings", icon: Settings },
@@ -61,6 +67,7 @@ const pageCopy: Record<Page, { title: string; description: string }> = {
     title: "Quotations",
     description: "Create and track client quotations.",
   },
+  invoices: { title: "Invoices", description: "Issue invoices and track payments." },
   orders: {
     title: "Orders & Projects",
     description: "Track agreed work, delivery, tasks, and payments.",
@@ -89,6 +96,13 @@ const money = (minor: number) =>
   }).format(minor / 100);
 
 export default function App() {
+  const [showIntro, setShowIntro] = useState(() => {
+    try {
+      return window.sessionStorage.getItem("jsn-business-intro-seen") !== "1";
+    } catch {
+      return true;
+    }
+  });
   const [page, setPage] = useState<Page>(() => {
     const p = window.location.pathname.slice(1) as Page;
     return nav.some((n) => n.id === p) ? p : "dashboard";
@@ -99,11 +113,19 @@ export default function App() {
   const [clientTarget, setClientTarget] = useState<string | null>(null);
   const [quotationClient, setQuotationClient] = useState<string | null>(null);
   const [quotationTarget, setQuotationTarget] = useState<string | null>(null);
+  const [invoiceClient, setInvoiceClient] = useState<string | null>(null);
+  const [invoiceTarget, setInvoiceTarget] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [gmail, setGmail] = useState<string | null>(null);
   const [gmailError, setGmailError] = useState(false);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  useEffect(() => {
+    if (!showIntro) return;
+    try { window.sessionStorage.setItem("jsn-business-intro-seen", "1"); } catch { /* Intro remains non-blocking when storage is unavailable. */ }
+    const timer = window.setTimeout(() => setShowIntro(false), 1350);
+    return () => window.clearTimeout(timer);
+  }, [showIntro]);
   const navigate = (next: Page) => {
     setPage(next);
     setMobileOpen(false);
@@ -179,6 +201,9 @@ export default function App() {
                     <span>Outstanding balance</span>
                     <strong>{money(stats.outstanding_minor)}</strong>
                   </div>
+                  <button className="metric-card invoice-dashboard-link" onClick={() => navigate("invoices")}>
+                    <span>Open invoices</span><strong>{stats.open_invoices}</strong><small>{stats.overdue_invoices} overdue · view invoices</small>
+                  </button>
                 </div>
                 <section className="business-panel">
                   <h2>Upcoming tasks</h2>
@@ -204,7 +229,7 @@ export default function App() {
           ) : null}
         </>
       );
-    if (page === "clients") return <ClientsPage initialClientId={clientTarget} onClearInitial={() => setClientTarget(null)} onCreateQuotation={(id) => { setQuotationClient(id); navigate("quotations"); }} onOpenQuotation={(id) => { setQuotationTarget(id); navigate("quotations"); }} />;
+    if (page === "clients") return <ClientsPage initialClientId={clientTarget} onClearInitial={() => setClientTarget(null)} onCreateQuotation={(id) => { setQuotationClient(id); navigate("quotations"); }} onCreateInvoice={(id)=>{setInvoiceClient(id);navigate("invoices");}} onOpenQuotation={(id) => { setQuotationTarget(id); navigate("quotations"); }} onOpenInvoice={(id)=>{setInvoiceTarget(id);navigate("invoices");}} />;
     if (page === "quotations")
       return (
         <QuotationsPage
@@ -220,6 +245,8 @@ export default function App() {
           }}
         />
       );
+    if (page === "invoices")
+      return <InvoicesPage defaultClientId={invoiceClient} onDefaultClientConsumed={()=>setInvoiceClient(null)} initialInvoiceId={invoiceTarget} onInitialInvoiceConsumed={()=>setInvoiceTarget(null)} onEmailStudio={() => { toast("Download the invoice PDF, attach it in Email Studio, and review before sending."); navigate("email"); }} />;
     if (page === "orders")
       return <ProjectsPage onClients={(id) => { setClientTarget(id || null); navigate("clients"); }} />;
     return (
@@ -282,6 +309,7 @@ export default function App() {
     <div
       className={`business-shell ${collapsed ? "is-collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}
     >
+      {showIntro && <div className="brand-intro" aria-hidden="true"><img src={logoUrl} alt="" /><span /></div>}
       <aside className="business-sidebar">
         <div className="sidebar-brand">
           <img src={logoUrl} alt="JSN Designs" />

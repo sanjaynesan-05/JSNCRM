@@ -1,6 +1,6 @@
 # JSN DESIGNS BUSINESS STUDIO
 
-JSN DESIGNS BUSINESS STUDIO is a local-first business workspace built around the existing JSN Mail Studio email editor. It combines that editor and its Gmail SMTP workflow with a SQLite foundation for clients, quotations, orders, payments, and tasks.
+JSN DESIGNS BUSINESS STUDIO is a local-first business workspace built around the existing JSN Mail Studio email editor. It combines that editor and its Gmail SMTP workflow with a SQLite foundation for clients, quotations, invoices, orders, payments, and tasks.
 
 This document describes the code that exists in this repository. The app includes the local database and validated API, an email editor, client and quotation workflows, project/order tracking, task and payment entry, a database-backed dashboard, and backup/restore.
 
@@ -66,11 +66,13 @@ Restart the API after changing `.env`. Do not put secrets in `VITE_` variables: 
 
 ## Application guide
 
-The sidebar provides Dashboard, Email Studio, Quotations, Orders & Projects, Clients, and Settings. Navigation uses browser history; the selected section is highlighted, and the sidebar collapses on wider screens and becomes a mobile drawer on narrow screens.
+The sidebar provides Dashboard, Email Studio, Quotations, Invoices, Orders & Projects, Clients, and Settings. Navigation uses browser history; the selected section is highlighted, and the sidebar collapses on wider screens and becomes a mobile drawer on narrow screens.
 
 ### Dashboard
 
 Dashboard values come from SQLite queries. It shows active client count, draft/sent quotation count, active order count, open task count, outstanding order balances, and up to five upcoming open tasks. A new database displays zero counts and an honest empty task state; no sample revenue, orders, or clients are fabricated.
+
+The dashboard also shows open and overdue invoice counts and links to the invoice list. It deliberately does not add invoice money to the existing order-balance figure.
 
 ### Email Studio
 
@@ -100,6 +102,16 @@ The Quotations screen creates and edits draft quotations with client selection, 
 
 Quotation dashboard amounts show the total value of displayed quotations; accepted value is separate and is not collected revenue. Users can download a server-generated PDF from the list or details view. The PDF uses the persisted quotation values, includes the bundled JSN logo, client and business contact details, saved line items, totals, terms, and page numbering; internal notes are excluded. PDF text supports Latin characters; other scripts are replaced with `?` because the current PDF renderer does not perform complex script shaping. Tax is not calculated. Settings supports editing the validated business profile and quotation defaults. After downloading a PDF, the details view can open Email Studio; the downloaded file must be attached manually and reviewed before the user sends it. Opening Email Studio or downloading a PDF does not mark a quotation as sent.
 
+### Invoices
+
+The Invoices screen supports direct draft invoices and confirmed creation from accepted quotations or orders. A source can have one non-void invoice; orders converted from a quotation keep both source links, and the same source cannot be invoiced once through the quote and again through the order. Drafts can be edited; issuing stores client and business contact snapshots, locks commercial fields, and adds a status-history record. An issued invoice may be voided only before payment; a void invoice can produce a linked reissue draft. Paid and outstanding states are derived from persisted payments and due dates. Invoice numbers are allocated transactionally in `INV-YYYY-NNNN` form using the issue year.
+
+All invoice values currently use INR paise. Tax is not calculated and this is a non-GST baseline; GST registration, place-of-supply, rate, and tax breakdown requirements have not been established. Payment instructions are not yet configurable separately from invoice terms. Invoice PDFs are generated from persisted items and the issue-time client/business snapshots, contain totals, amount paid, balance due, and terms, and do not mutate invoice state. Complex-script PDF shaping remains unsupported. Download the PDF and attach/review it manually in Email Studio; no invoice email is sent automatically.
+
+PDF rendering investigation: PDFKit can embed TTF/TTC fonts and the installed Fontkit dependency contains Indic shaping paths for Tamil and Devanagari. The current PDF services still replace non-Latin characters and use standard fonts, so that capability is not enabled or claimed. A follow-up should prototype licensed Noto fonts and verify visual output, wrapping, and extracted text before support is enabled. See [PDFKit font embedding](https://pdfkit.org/docs/text.html), [Fontkit shaping source](https://github.com/foliojs/fontkit/tree/master/src/opentype/shapers), and [HarfBuzz script coverage](https://harfbuzz.github.io/what-does-harfbuzz-do.html).
+
+Invoice receipts for order-linked invoices are written once to the existing `payments` table and linked by `invoice_payments.order_payment_id`; the same payment ID supplies both invoice and order balances. Older order payments are allocated when the invoice is created. Order receipts recorded through the existing order payment form are allocated to the linked invoice. Direct invoice receipts live only in `invoice_payments`. The dashboard keeps invoice status counts separate from the existing order balance. The baseline enforces a single invoice per source order or quotation and requires an order-linked invoice total to match its agreed order amount.
+
 ### Orders & Projects
 
 The Orders & Projects screen creates direct orders, updates order status and delivery state, and shows agreed, paid, and outstanding amounts. It can add independent or project-linked tasks, change task status, record partial payments against an order, and inspect payment history. The API rejects payments above the outstanding balance. Order and task forms include due dates, priorities, descriptions, and requirements.
@@ -119,6 +131,7 @@ src/
   main.tsx                        React entry point and toast provider
   components/SpreadsheetTableEditor.tsx
   pages/QuotationsPage.tsx         Quotation editor, detail view, lifecycle and conversion
+  pages/InvoicesPage.tsx           Invoice drafts, lifecycle, payments, and PDF handoff
   pages/ProjectsPage.tsx           Order, task and payment workflows
   pages/ClientsPage.tsx            Searchable client directory, details and lifecycle actions
   services/api/apiClient.ts        Shared local API client
@@ -135,9 +148,14 @@ server/
   schemas/business.ts             Zod validation schemas
   routes/email.routes.ts          Existing email API with runtime payload validation
   routes/business.routes.ts       Business data, dashboard and backup API
+  routes/invoice.routes.ts        Invoice lifecycle, payment allocation and PDF API
+  services/invoice-pdf.ts         Snapshot-based invoice PDF generation
   services/html.service.ts        Server re-export of the shared HTML generator
   services/mail.service.ts        Gmail SMTP transport
   business.test.ts                API and database tests using temporary data
+  invoice-database.test.ts        Invoice migration and backup/restore preservation
+  invoice-pdf.test.ts              Invoice PDF contents and pagination
+  invoice.test.ts                  Invoice API lifecycle/accounting regression tests
 ```
 
 Frontend components call typed local API helpers and do not run SQL. The server uses parameterized SQL through `better-sqlite3`. Express middleware includes Helmet, CORS, rate limiting, and Origin/Host checks for state-changing methods. Zod validates untrusted business and email request payloads.
@@ -176,6 +194,7 @@ Amounts are stored as integer minor units. For INR, one unit is one paise. The A
 
 - Quotation: `draft`, `sent`, `accepted`, `rejected`, `expired`, `cancelled`.
 - Order: `new`, `confirmed`, `in_progress`, `client_review`, `revisions`, `ready_for_delivery`, `delivered`, `on_hold`, `cancelled`, `closed`.
+- Invoice stored lifecycle: `draft → issued → void`; the displayed `partially_paid`, `paid`, and `overdue` states are derived from allocated payment totals and the due date.
 - Task: `pending`, `in_progress`, `completed`, `cancelled`.
 - Priority: `low`, `normal`, `high`, `urgent`.
 
@@ -193,6 +212,8 @@ The API base is `http://127.0.0.1:5000/api` when running directly; frontend code
 | ------ | ------------ | --------------------------------------------------------------------------------- |
 | `GET`  | `/health`    | API health and service name.                                                      |
 | `GET`  | `/dashboard` | Counts, outstanding amount in paise, and upcoming open tasks from actual records. |
+
+Dashboard counts include open and overdue invoices; invoice amounts remain outside the order outstanding figure.
 
 ### Clients
 
@@ -280,6 +301,21 @@ Payment example:
 }
 ```
 
+### Invoices
+
+| Method | Path | Result |
+| ------ | ---- | ------ |
+| `GET` | `/invoices` | Search by invoice/client and filter `status`, `date_field=issue|due`, `from`, and `to`. |
+| `POST` | `/invoices` | Create a draft; optional `source_order_id` or `source_quotation_id` requires `confirm_source: true`. Amounts are recalculated server-side. |
+| `GET` | `/invoices/:id` | Read saved details, derived status/balance, line items, payment entries, and status history. |
+| `PUT` | `/invoices/:id` | Edit an unissued draft; issued and void invoices are immutable. |
+| `PATCH` | `/invoices/:id/status` | JSON `{"action":"issue"}` or `{"action":"void"}`; issuance snapshots client/business details. |
+| `POST` | `/invoices/:id/reissue` | Create a draft from a void invoice, linked to the original. |
+| `POST` | `/invoices/:id/payments` | Record an issued invoice payment; requires `amount_minor`, `payment_date`, and a UUID `idempotency_key`. |
+| `GET` | `/invoices/:id/pdf` | Download a PDF from persisted invoice data and issue snapshots; drafts have no customer PDF. |
+
+For invoices linked to orders, payment creation also creates exactly one existing order payment and the invoice ledger entry references it. This endpoint and `/orders/:id/payments` use a transaction and reject repeat references, duplicate submission keys, and amounts beyond the remaining invoice/order balance. The invoice list uses derived status; database status history stores only draft, issued, and void transitions. Invoice numbering is unique and generated in the server transaction by issue year.
+
 This records ₹500.00. Payments inherit the order currency; this milestone defaults to INR.
 
 ### Backups and email
@@ -332,9 +368,19 @@ npm test
 - Accepted-quotation conversion, rejection of unaccepted conversion by default, and duplicate conversion prevention.
 - Payment balance calculations and overpayment rejection; task creation and status updates.
 - Database-backed dashboard aggregation, snapshot backup, invalid-backup rejection, successful restore, and recovery-file preservation.
+- Invoice migration and backup/restore preservation; invoice PDF persisted content and pagination.
+- Invoice lifecycle/accounting API regression cases are present but require a runtime that permits local loopback TCP.
 - Existing generated email HTML and email API input validation/config secrecy.
 
 Tests do not use the normal `%LOCALAPPDATA%` business database and do not send real email. A production dependency security scan can be run with `npm audit --omit=dev`; the complete dependency tree can be inspected with `npm audit`.
+
+### Invoice milestone verification (2026-10-12)
+
+- `npm test`: 4 passed, 0 failed, 2 skipped. Both skips are loopback-dependent API integration suites; the runtime reports `EACCES`. Migration/backup and invoice PDF tests ran.
+- `npm run build`: passed. The sandboxed Vite process could not asynchronously resolve `index.html` (`EPERM`); the requested build ran outside that filesystem restriction and passed.
+- `git diff --check`: passed (Git emitted working-copy line-ending warnings).
+- `npm audit`: 7 development-tree findings (5 high, 2 moderate) in the Tailwind 3 dependency path; the offered all-fix requires breaking Tailwind 4. No force upgrade was run. `npm audit --omit=dev`: 0 findings.
+- Manual browser acceptance was not performed because the Computer Use helper stopped when it could not determine the active Edge URL with sufficient confidence. See [TODO.md](TODO.md) for blockers and next actions.
 
 ### Release verification (2026-10-09)
 

@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import emailRoutes from "./routes/email.routes.ts";
 import businessRoutes from "./routes/business.routes.ts";
+import invoiceRoutes from "./routes/invoice.routes.ts";
 
 export function createApp() {
   const app = express();
@@ -46,6 +47,7 @@ export function createApp() {
     response.json({ ok: true, service: "jsn-designs-business-studio" }),
   );
   app.use("/api/email", emailRoutes);
+  app.use("/api/invoices", invoiceRoutes);
   app.use("/api", businessRoutes);
   return app;
 }

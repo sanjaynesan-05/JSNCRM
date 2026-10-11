@@ -48,7 +48,9 @@ router.get("/dashboard", (_req, res) => {
       `SELECT (SELECT COUNT(*) FROM clients WHERE archived_at IS NULL) clients,
     (SELECT COUNT(*) FROM quotations WHERE status IN ('draft','sent')) open_quotations,
     (SELECT COUNT(*) FROM orders WHERE status NOT IN ('closed','cancelled')) active_orders,
-    (SELECT COUNT(*) FROM tasks WHERE status IN ('pending','in_progress')) open_tasks`,
+    (SELECT COUNT(*) FROM tasks WHERE status IN ('pending','in_progress')) open_tasks,
+    (SELECT COUNT(*) FROM invoices WHERE status IN ('draft','issued')) open_invoices,
+    (SELECT COUNT(*) FROM invoices WHERE status='issued' AND due_date<date('now') AND total_minor>(SELECT COALESCE(SUM(amount_minor),0) FROM invoice_payments WHERE invoice_id=invoices.id)) overdue_invoices`,
     )
     .get();
   const outstanding = db
@@ -84,10 +86,14 @@ router.get("/clients/:id", (req, res) => {
   const client = db.prepare("SELECT * FROM clients WHERE id=?").get(id.data) as any;
   if (!client) return bad(res, "Client not found.", 404);
   const quotations = db.prepare("SELECT id,quotation_number,title,status,total_minor,currency,issue_date,valid_until FROM quotations WHERE client_id=? ORDER BY created_at DESC").all(id.data);
+  const invoices = db.prepare(`SELECT i.id,i.invoice_number,i.title,i.total_minor,i.currency,i.issue_date,i.due_date,
+    CASE WHEN i.status='draft' THEN 'draft' WHEN i.status='void' THEN 'void' WHEN COALESCE(p.paid,0)>=i.total_minor THEN 'paid' WHEN i.due_date<date('now') THEN 'overdue' WHEN COALESCE(p.paid,0)>0 THEN 'partially_paid' ELSE 'issued' END status
+    FROM invoices i LEFT JOIN (SELECT invoice_id,SUM(amount_minor) paid FROM invoice_payments GROUP BY invoice_id) p ON p.invoice_id=i.id
+    WHERE i.client_id=? ORDER BY i.created_at DESC`).all(id.data);
   const orders = db.prepare(`SELECT o.id,o.order_number,o.title,o.status,o.agreed_amount_minor,o.currency,o.order_date,o.due_date,COALESCE(p.paid,0) paid_minor,o.agreed_amount_minor-COALESCE(p.paid,0) outstanding_minor FROM orders o LEFT JOIN (SELECT order_id,SUM(amount_minor) paid FROM payments GROUP BY order_id) p ON p.order_id=o.id WHERE o.client_id=? ORDER BY o.created_at DESC`).all(id.data) as any[];
   const tasks = db.prepare(`SELECT t.id,t.order_id,o.order_number,t.title,t.status,t.priority,t.due_date,t.completed_at FROM tasks t JOIN orders o ON o.id=t.order_id WHERE o.client_id=? ORDER BY t.due_date IS NULL,t.due_date`).all(id.data);
   const outstanding_minor = orders.filter((o) => !["cancelled", "closed"].includes(o.status)).reduce((sum, o) => sum + o.outstanding_minor, 0);
-  res.json({ client, quotations, orders, tasks, outstanding_minor });
+  res.json({ client, quotations, invoices, orders, tasks, outstanding_minor });
 });
 router.post("/clients", (req, res) => {
   const input = parsed(clientSchema, req.body);
@@ -614,20 +620,26 @@ router.post("/orders/:id/payments", (req, res) => {
   const d = input.data,
     stamp = now(),
     pid = randomUUID();
-  db.prepare(
-    "INSERT INTO payments(id,order_id,amount_minor,currency,payment_date,payment_method,reference,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-  ).run(
-    pid,
-    id.data,
-    d.amount_minor,
-    order.currency,
-    d.payment_date || today(),
-    d.payment_method || null,
-    d.reference || null,
-    d.notes || null,
-    stamp,
-    stamp,
-  );
+  try {
+    db.transaction(() => {
+      const currentPaid=(db.prepare("SELECT COALESCE(SUM(amount_minor),0) total FROM payments WHERE order_id=?").get(id.data) as any).total;
+      if (currentPaid + d.amount_minor > order.agreed_amount_minor) throw new Error("ORDER_EXCESS");
+      const paymentDate=d.payment_date||today(), idempotencyKey=d.idempotency_key||randomUUID();
+      if (db.prepare("SELECT 1 FROM payments WHERE idempotency_key=?").get(idempotencyKey)) throw new Error("DUPLICATE");
+      if (d.reference ? db.prepare("SELECT 1 FROM payments WHERE order_id=? AND lower(trim(reference))=lower(trim(?))").get(id.data,d.reference) : db.prepare("SELECT 1 FROM payments WHERE order_id=? AND amount_minor=? AND payment_date=? AND COALESCE(payment_method,'')=COALESCE(?,'')").get(id.data,d.amount_minor,paymentDate,d.payment_method||null)) throw new Error("DUPLICATE");
+      const invoice = db.prepare("SELECT id,status,total_minor FROM invoices WHERE source_order_id=?").get(id.data) as any;
+      if (invoice) {
+        if (invoice.status !== "issued") throw new Error("INVOICE_NOT_ISSUED");
+        const invoicePaid=(db.prepare("SELECT COALESCE(SUM(amount_minor),0) total FROM invoice_payments WHERE invoice_id=?").get(invoice.id) as any).total;
+        if (invoicePaid + d.amount_minor > invoice.total_minor) throw new Error("INVOICE_EXCESS");
+      }
+      db.prepare("INSERT INTO payments(id,order_id,amount_minor,currency,payment_date,payment_method,reference,notes,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(pid,id.data,d.amount_minor,order.currency,paymentDate,d.payment_method||null,d.reference||null,d.notes||null,idempotencyKey,stamp,stamp);
+      if (invoice) db.prepare("INSERT INTO invoice_payments(id,invoice_id,order_payment_id,amount_minor,payment_date,payment_method,reference,notes,idempotency_key,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(randomUUID(),invoice.id,pid,d.amount_minor,paymentDate,d.payment_method||null,d.reference||null,d.notes||null,idempotencyKey,stamp);
+    })();
+  } catch (error) {
+    const message=error instanceof Error?error.message:"";
+    return bad(res,message==="DUPLICATE"?"A payment with this reference and amount already exists.":message==="INVOICE_NOT_ISSUED"?"Issue or void the linked invoice before recording order payments.":message==="INVOICE_EXCESS"?"Payment exceeds the linked invoice balance.":message==="ORDER_EXCESS"?"Payment exceeds the remaining order balance.":"Unable to record payment.",message==="DUPLICATE"||message==="INVOICE_NOT_ISSUED"||message==="INVOICE_EXCESS"||message==="ORDER_EXCESS"?409:500);
+  }
   res.status(201).json({
     id: pid,
     paid_minor: paid + d.amount_minor,

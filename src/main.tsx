@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import App from "./App";
 import "./styles.css";
 import "./styles-extensions.css";
+import "./brand.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -48,7 +48,7 @@ import logoUrl from "./assets/JSN DESIGN.png";
 import SpreadsheetTableEditor from "./components/SpreadsheetTableEditor";
 
 const fonts = [
-  "Arial, Helvetica, sans-serif",
+  '"Proxima Nova", Arial, Helvetica, sans-serif',
   "Georgia, serif",
   "Verdana, sans-serif",
   "Trebuchet MS, sans-serif",
@@ -60,7 +60,7 @@ const style = (overrides: Partial<TypographyStyle> = {}): TypographyStyle => ({
   lineHeight: 1.6,
   letterSpacing: 0,
   textAlign: "left",
-  color: "#17211e",
+  color: "#1a1a1a",
   backgroundColor: "transparent",
   ...overrides,
 });
@@ -68,7 +68,7 @@ const defaultStyles: Record<TypographyTarget, TypographyStyle> = {
   title: style({
     fontSize: 28,
     fontWeight: 700,
-    color: "#17211e",
+    color: "#000000",
     backgroundColor: "#ffffff",
   }),
   heading: style({ fontSize: 18, fontWeight: 700 }),
@@ -78,8 +78,8 @@ const defaultStyles: Record<TypographyTarget, TypographyStyle> = {
   button: style({
     fontSize: 13,
     fontWeight: 700,
-    color: "#ffffff",
-    backgroundColor: "#1c5148",
+    color: "#000000",
+    backgroundColor: "#d4af37",
     textAlign: "center",
   }),
   signature: style({ fontSize: 14, fontWeight: 600 }),
@@ -94,9 +94,9 @@ const newTable = (): EmailTable => ({
   align: "left",
   fontSize: 13,
   fontWeight: 400,
-  color: "#17211e",
-  backgroundColor: "#edf4f0",
-  borderColor: "#cedbd3",
+  color: "#1a1a1a",
+  backgroundColor: "#f5f5f5",
+  borderColor: "#d4af37",
   borderWidth: 1,
   cellPadding: 10,
 });
@@ -983,7 +983,7 @@ function RichTextEditor({
         <input
           aria-label="Text color"
           type="color"
-          defaultValue="#17211e"
+          defaultValue="#1a1a1a"
           title="Text color"
           onChange={(e) => command("foreColor", e.target.value)}
         />
