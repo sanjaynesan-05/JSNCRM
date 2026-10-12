@@ -127,12 +127,12 @@ input::placeholder, textarea::placeholder { color: #777; }
 .email-content .text-button:hover { color: var(--brand-black); }
 .email-content .preview-canvas { border-color: var(--line); }
 
-.brand-intro { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: var(--brand-white); pointer-events: none; animation: brand-intro-out 1.35s ease 0s 1 both; }
-.brand-intro img { display: block; width: min(210px, 54vw); height: auto; object-fit: contain; animation: brand-logo-in .8s cubic-bezier(.2,.7,.2,1) both; }
-.brand-intro span { display: block; width: min(150px, 38vw); height: 1px; background: var(--brand-gold); transform-origin: center; animation: brand-rule-in .5s ease .45s both; }
-@keyframes brand-logo-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
-@keyframes brand-rule-in { from { opacity: 0; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
-@keyframes brand-intro-out { 0%, 68% { opacity: 1; visibility: visible; } 100% { opacity: 0; visibility: hidden; } }
+.brand-intro { position: fixed; inset: 0; z-index: 2147483646; display: grid; place-items: center; width: 100vw; height: 100dvh; min-height: 100vh; margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 0; background: var(--brand-white); isolation: isolate; opacity: 1; visibility: visible; transition: opacity .35s ease, visibility .35s ease; }
+.brand-intro.is-exiting { opacity: 0; visibility: hidden; }
+.brand-intro-video { position: absolute; inset: 0; display: block; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; object-fit: contain; object-position: center; background: var(--brand-white); }
+.brand-intro-skip { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); z-index: 2147483647; min-width: 92px; min-height: 42px; margin: 0; padding: 10px 16px; border: 1px solid var(--brand-gold); border-radius: 2px; background: var(--brand-black); color: var(--brand-white); font-size: 13px; font-weight: 600; cursor: pointer; }
+.brand-intro-skip:hover { background: #252525; }
+.brand-intro-skip:focus-visible { outline: 3px solid var(--brand-gold); outline-offset: 3px; }
 
 @media (max-width: 760px) {
   .business-content { padding: 24px 16px 50px; }

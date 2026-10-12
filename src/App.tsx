@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   BriefcaseBusiness,
@@ -21,6 +21,7 @@ import ClientsPage from "./pages/ClientsPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import BusinessProfileForm from "./components/BusinessProfileForm";
 import logoUrl from "./assets/JSN DESIGN.png";
+import introVideoUrl from "./assets/logo reveal.mp4";
 
 type Page =
   | "dashboard"
@@ -98,11 +99,17 @@ const money = (minor: number) =>
 export default function App() {
   const [showIntro, setShowIntro] = useState(() => {
     try {
-      return window.sessionStorage.getItem("jsn-business-intro-seen") !== "1";
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+      if (window.sessionStorage.getItem("jsn-business-intro-video-v2-seen") === "1") return false;
+      return true;
     } catch {
       return true;
     }
   });
+  const [introExiting, setIntroExiting] = useState(false);
+  const introVideoRef = useRef<HTMLVideoElement>(null);
+  const introSkipRef = useRef<HTMLButtonElement>(null);
+  const introFadeTimerRef = useRef<number | null>(null);
   const [page, setPage] = useState<Page>(() => {
     const p = window.location.pathname.slice(1) as Page;
     return nav.some((n) => n.id === p) ? p : "dashboard";
@@ -120,11 +127,37 @@ export default function App() {
   const [gmail, setGmail] = useState<string | null>(null);
   const [gmailError, setGmailError] = useState(false);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const closeIntro = () => {
+    if (introFadeTimerRef.current !== null) window.clearTimeout(introFadeTimerRef.current);
+    introFadeTimerRef.current = null;
+    introVideoRef.current?.pause();
+    setShowIntro(false);
+  };
+  const finishIntro = () => {
+    setIntroExiting(true);
+    introFadeTimerRef.current = window.setTimeout(closeIntro, 350);
+  };
   useEffect(() => {
     if (!showIntro) return;
-    try { window.sessionStorage.setItem("jsn-business-intro-seen", "1"); } catch { /* Intro remains non-blocking when storage is unavailable. */ }
-    const timer = window.setTimeout(() => setShowIntro(false), 1350);
-    return () => window.clearTimeout(timer);
+    const root = document.documentElement;
+    const previousRootOverflow = root.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    try { window.sessionStorage.setItem("jsn-business-intro-video-v2-seen", "1"); } catch { /* Playback still works when session storage is unavailable. */ }
+    root.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    const timer = window.setTimeout(closeIntro, 6_500);
+    void introVideoRef.current?.play().catch((error: unknown) => {
+      const name = error instanceof Error ? error.name : "";
+      if (name !== "AbortError" && name !== "NotAllowedError") closeIntro();
+    });
+    return () => {
+      window.clearTimeout(timer);
+      if (introFadeTimerRef.current !== null) window.clearTimeout(introFadeTimerRef.current);
+      introFadeTimerRef.current = null;
+      introVideoRef.current?.pause();
+      root.style.overflow = previousRootOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
   }, [showIntro]);
   const navigate = (next: Page) => {
     setPage(next);
@@ -309,7 +342,13 @@ export default function App() {
     <div
       className={`business-shell ${collapsed ? "is-collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}
     >
-      {showIntro && <div className="brand-intro" aria-hidden="true"><img src={logoUrl} alt="" /><span /></div>}
+      {showIntro && <div className={`brand-intro${introExiting ? " is-exiting" : ""}`} role="dialog" aria-modal="true" aria-label="JSN Designs brand intro" onKeyDown={(event) => {
+        if (event.key === "Escape") closeIntro();
+        if (event.key === "Tab") { event.preventDefault(); introSkipRef.current?.focus(); }
+      }}>
+        <video ref={introVideoRef} className="brand-intro-video" src={introVideoUrl} poster={logoUrl} autoPlay muted playsInline preload="auto" aria-hidden="true" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = 2; }} onEnded={finishIntro} onError={closeIntro} />
+        <button ref={introSkipRef} className="brand-intro-skip" type="button" autoFocus onClick={closeIntro}>Skip intro</button>
+      </div>}
       <aside className="business-sidebar">
         <div className="sidebar-brand">
           <img src={logoUrl} alt="JSN Designs" />

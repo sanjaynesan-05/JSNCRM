@@ -19,8 +19,9 @@
 - [x] Use Proxima Nova as the first-choice UI font with Arial/Helvetica fallbacks; do not bundle fonts or depend on a third-party font download.
 - [x] Restyle navigation, dashboard, records, forms, tables, buttons, responsive layouts, and focus/hover states while retaining existing page components, API routes, data and Gmail SMTP behavior.
 - [x] Apply the restrained palette to Email Studio defaults, templates and generated email presentation; preserve email composition and sending workflows.
-- [x] Add a non-blocking logo intro using the approved existing logo asset, played once per session and hidden for reduced-motion preference.
-- [ ] Browser-check all pages at mobile/tablet/desktop sizes, keyboard focus and reduced-motion mode; confirm Proxima Nova is available in the target Windows environment or assess licensed acquisition.
+- [x] Play the provided `src/assets/logo reveal.mp4` once per browser session at 2× speed (~5 seconds), as an uncropped `100vw` × `100dvh` full-screen video, with scroll lock, bottom-right Skip intro, reduced-motion bypass, playback-error fallback and a short fade into the app.
+- [ ] Browser-check fullscreen sizing at mobile/tablet/desktop, completion, Skip, reduced-motion bypass, video failure and keyboard focus; confirm Proxima Nova is available in the target Windows environment or assess licensed acquisition.
+- [ ] Browser acceptance is still blocked: Computer Use could not determine the active Edge URL confidently, and no Playwright/Puppeteer package is installed in this workspace. Next action: open the local app in Edge at a verifiable URL or provide an approved browser automation environment, then run the responsive/playback checks above.
 - [ ] Review the refreshed app and intro with the owner for visual acceptance.
 - [ ] Perform the brand identity PDF audit only if separately authorized.
 
