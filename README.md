@@ -54,8 +54,9 @@ Copy `.env.example` to `.env`. Values are read by the backend at startup.
 | -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `GMAIL_USER`         | Empty                                                                   | Gmail/Google Workspace sender address.                                   |
 | `GMAIL_APP_PASSWORD` | Empty                                                                   | Gmail App Password used by Nodemailer. It is never sent to the browser.  |
+| `SMTP_PORT`          | `587`                                                                   | SMTP TCP port. Uses STARTTLS on 587; set `465` for implicit TLS.          |
 | `PORT`               | `5000`                                                                  | Express API port.                                                        |
-| `HOST`               | `127.0.0.1`                                                             | Express bind host. Loopback is the intended default.                     |
+| `HOST`               | `127.0.0.1`                                                             | Express bind host. Only loopback addresses are accepted because the app has no sign-in. |
 | `CLIENT_URL`         | `http://localhost:5173`                                                 | Browser origin permitted by CORS and state-changing request checks.      |
 | `DATABASE_PATH`      | `%LOCALAPPDATA%\JSN Designs Business Studio\business.sqlite` on Windows | SQLite database file. Set an absolute path if you want another location. |
 | `BACKUP_DIR`         | `%LOCALAPPDATA%\JSN Designs Business Studio\backups` on Windows         | Folder for generated backup snapshots.                                   |
@@ -200,7 +201,9 @@ Amounts are stored as integer minor units. For INR, one unit is one paise. The A
 
 Quotation conversion is transactional and unique by source quotation. It returns the existing order if the same quotation is submitted for conversion again. Only an accepted quotation converts by default. An API caller must explicitly send `{"confirm_unaccepted":true}` to override that rule. Payments cannot exceed the current outstanding amount. Outstanding balances are derived from payment records; delivery does not mark an order as paid.
 
-Date-only values use `YYYY-MM-DD`; stored timestamps use ISO 8601. References are generated locally (for example `CL-YYYYMMDD-...`, `QT-YYYYMMDD-...`, and `OR-YYYYMMDD-...`).
+Date-only values use `YYYY-MM-DD` in the configured business timezone (`BUSINESS_TIME_ZONE` for the API and `VITE_BUSINESS_TIME_ZONE` for the browser); both default to `Asia/Kolkata`. Keep the two settings aligned. Stored timestamps use ISO 8601 UTC. References are generated using the business date (for example `CL-YYYYMMDD-...`, `QT-YYYYMMDD-...`, and `OR-YYYYMMDD-...`).
+
+Order and task status changes are appended to their status-history tables. Existing records receive a baseline history entry during migration; it records the status present at migration time, not prior transitions. Payments are never deleted: a full reversal requires a reason and is recorded as an immutable entry. Reversing a payment updates the order and linked invoice balances together. This records an accounting correction only; it does not send a refund to a payment provider or customer.
 
 ## HTTP API
 
@@ -285,6 +288,7 @@ Example creation request (unit prices are paise; fixed discount value is rupees)
 | `PATCH` | `/orders/:id/status`   | Change order status. Setting `delivered` records `delivered_at`.                                                                                      |
 | `GET`   | `/orders/:id/payments` | List an order's payments.                                                                                                                             |
 | `POST`  | `/orders/:id/payments` | Record a payment. `amount_minor` is required; amount cannot exceed outstanding balance.                                                               |
+| `POST`  | `/orders/:id/payments/:paymentId/reverse` | Reverse a full payment with a reason; any linked invoice allocation is reversed with it. |
 | `GET`   | `/tasks`               | List tasks, including linked order reference where present.                                                                                           |
 | `POST`  | `/tasks`               | Create an independent or order-linked task. Required: `title`; optional: `order_id`, description, status, priority, due date.                         |
 | `PATCH` | `/tasks/:id/status`    | Change task status. Completing a task records its completion timestamp.                                                                               |
@@ -312,9 +316,10 @@ Payment example:
 | `PATCH` | `/invoices/:id/status` | JSON `{"action":"issue"}` or `{"action":"void"}`; issuance snapshots client/business details. |
 | `POST` | `/invoices/:id/reissue` | Create a draft from a void invoice, linked to the original. |
 | `POST` | `/invoices/:id/payments` | Record an issued invoice payment; requires `amount_minor`, `payment_date`, and a UUID `idempotency_key`. |
+| `POST` | `/invoices/:id/payments/:paymentId/reverse` | Reverse a full payment with a required reason; linked order and invoice balances update together. |
 | `GET` | `/invoices/:id/pdf` | Download a PDF from persisted invoice data and issue snapshots; drafts have no customer PDF. |
 
-For invoices linked to orders, payment creation also creates exactly one existing order payment and the invoice ledger entry references it. This endpoint and `/orders/:id/payments` use a transaction and reject repeat references, duplicate submission keys, and amounts beyond the remaining invoice/order balance. The invoice list uses derived status; database status history stores only draft, issued, and void transitions. Invoice numbering is unique and generated in the server transaction by issue year.
+For invoices linked to orders, payment creation also creates exactly one existing order payment and the invoice ledger entry references it. This endpoint and `/orders/:id/payments` use a transaction and reject repeat references, duplicate submission keys, and amounts beyond the remaining invoice/order balance. Order-linked invoices must equal the agreed order amount and cannot be discounted. Payments can be fully reversed with a reason through either the order or invoice payment history; a linked payment is reversed in both ledgers. The invoice list uses derived status; database status history stores only draft, issued, and void transitions. Invoice numbering is unique and generated in the server transaction by issue year.
 
 This records ₹500.00. Payments inherit the order currency; this milestone defaults to INR.
 
@@ -334,14 +339,14 @@ Email endpoints retain the editor's multipart request format: JSON content in fo
 
 1. Open **Settings** and choose **Download database backup**. SQLite creates a consistent snapshot; the API stores a dated `.sqlite` file in `BACKUP_DIR` and streams it to the browser.
 2. Keep the downloaded backup in a private location outside the repository. Backups contain client and financial records.
-3. To restore, select a backup file in Settings and choose **Restore backup**. The API accepts one file up to 200 MB and checks SQLite integrity, foreign-key integrity, schema version, and required tables before replacing the active database.
+3. To restore, select a backup file in Settings and choose **Restore backup**. The API accepts one file up to 200 MB and checks SQLite integrity, foreign-key integrity, migration sequence, supported schema version, and tables required by the version claimed in the backup before replacing the active database. Supported older backups are migrated forward on restore; backups claiming a newer or incomplete schema are rejected.
 4. Before replacement, the current database is retained beside the active file as `business.sqlite.recovery-<timestamp>`. If replacement cannot complete, the API attempts to restore the prior file. After a successful restore, verify the displayed records and retain the recovery file until satisfied.
 
 Restore accepts backups produced with this schema version. Restoring an older backup replaces the current business data with the contents of that backup. Take a fresh backup first if you may need the current records.
 
 ## Security and privacy
 
-- By default, Express listens only on `127.0.0.1` and Vite binds its local development server. The application has no authentication, user accounts, or authorization model.
+- Express accepts only IPv4/IPv6 loopback bind addresses and Vite binds its local development server. The application has no authentication, user accounts, or authorization model; setting `HOST` to a network-facing address stops the API from starting.
 - CORS is limited to `CLIENT_URL`; state-changing requests validate supplied Origin and loopback Host values. Helmet security headers and a 60-request-per-15-minute rate limit are enabled.
 - On 2026-10-09, `npm audit` reported 7 development-tree findings (5 high, 2 moderate); `npm audit --omit=dev` reported 0 production findings. Affected packages are `tailwindcss`, `braces`, `chokidar`, `fast-glob`, `micromatch`, `postcss-nested`, and `postcss-selector-parser`. The current Tailwind 3.4.19 range is affected; npm proposes Tailwind 4.3.3, a major upgrade. This audit was not force-fixed because Tailwind 4 requires build configuration and CSS compatibility work. Re-run both audit commands before release.
 - SQL values are passed as parameters. Business request bodies are validated at runtime. Database files and backups are not served by Vite.

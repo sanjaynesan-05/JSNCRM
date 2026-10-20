@@ -19,12 +19,13 @@ import type {
   Task,
   TaskStatus,
 } from "../types/business";
+import { localDate } from "../services/date";
 
 const money = (minor: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(
     minor / 100,
   );
-const day = () => new Date().toISOString().slice(0, 10);
+const day = () => localDate();
 const orderStatuses: OrderStatus[] = [
   "new",
   "confirmed",
@@ -244,6 +245,19 @@ export default function ProjectsPage({ onClients }: { onClients: (clientId?: str
     } finally {
       setSaving(false);
     }
+  };
+  const reversePayment=async(payment:Payment)=>{
+    if(!activeOrder||payment.reversed_at)return;
+    const reason=window.prompt("Reason for reversing this full payment. This records an accounting correction; it does not send money back to the customer.");
+    if(reason===null)return;
+    if(reason.trim().length<3){toast.error("Enter a reason with at least 3 characters.");return;}
+    if(!window.confirm(`Reverse ${money(payment.amount_minor)} from this order and any linked invoice?`))return;
+    try{
+      await api(`/api/orders/${activeOrder}/payments/${payment.id}/reverse`,jsonRequest("POST",{reason:reason.trim()}));
+      await refresh();
+      setPayments(await api<Payment[]>(`/api/orders/${activeOrder}/payments`));
+      toast.success("Payment reversal recorded.");
+    }catch(e){toast.error(e instanceof Error?e.message:"Unable to reverse payment.");}
   };
 
   return (
@@ -658,6 +672,13 @@ export default function ProjectsPage({ onClients }: { onClients: (clientId?: str
                         </span>
                       )}
                     </div>
+                    <section className="project-status-history" aria-label="Order status history">
+                      <h4>Status history</h4>
+                      <ol>{(order.status_history||[]).map((change,index)=><li key={`${change.changed_at}-${index}`}>
+                        <span>{change.previous_status?`${change.previous_status.replace(/_/g," ")} → `:"Created as "}{change.new_status.replace(/_/g," ")}</span>
+                        <small>{new Date(change.changed_at).toLocaleString()}</small>
+                      </li>)}</ol>
+                    </section>
                   </section>
                 ) : null;
               })()}
@@ -695,7 +716,7 @@ export default function ProjectsPage({ onClients }: { onClients: (clientId?: str
                             {p.payment_method || "Method not specified"}
                           </small>
                         </span>
-                        <span>{p.reference || ""}</span>
+                        <span>{p.reference || ""}{p.reversed_at?<small>Reversed {p.reversed_at.slice(0,10)}: {p.reversal_reason}</small>:<button type="button" className="secondary-button compact-button" onClick={()=>void reversePayment(p)}>Reverse payment</button>}</span>
                       </li>
                     ))}
                   </ul>
@@ -852,6 +873,7 @@ export default function ProjectsPage({ onClients }: { onClients: (clientId?: str
                               </option>
                             ))}
                           </select>
+                          {(t.status_history||[]).length>1&&<details className="task-status-history"><summary>View {t.status_history?.length} status entries</summary><ol>{t.status_history?.map((change,index)=><li key={`${change.changed_at}-${index}`}>{change.previous_status?`${change.previous_status.replace(/_/g," ")} → `:"Created as "}{change.new_status.replace(/_/g," ")} · {new Date(change.changed_at).toLocaleString()}</li>)}</ol></details>}
                         </td>
                       </tr>
                     ))}

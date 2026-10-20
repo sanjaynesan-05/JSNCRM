@@ -269,18 +269,26 @@ export default function EmailStudio() {
     ]);
   };
   const send = async (kind: "test" | "send") => {
-    if (!draft.to.trim() || !draft.subject.trim())
-      return toast.error("Add a recipient and subject first.");
-    if (
-      !recipients(draft.to).every((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
-    )
-      return toast.error("Check the recipient email address.");
+    if ((kind === "send" && !draft.to.trim()) || !draft.subject.trim())
+      return toast.error(kind === "test" ? "Add a subject first." : "Add a recipient and subject first.");
+    if (kind === "test" && account === "Not connected")
+      return toast.error(
+        "Gmail is not connected. Configure GMAIL_USER and GMAIL_APP_PASSWORD first.",
+      );
+    const allRecipients = kind === "test" ? [] : [draft.to, draft.cc, draft.bcc].flatMap(recipients);
+    if (kind === "send" && (
+      !recipients(draft.to).length ||
+      !allRecipients.every((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    ))
+      return toast.error(
+        "Check the recipient email addresses in To, CC, and BCC.",
+      );
     setBusy(kind);
     try {
       const data = new FormData();
       data.append(
         "payload",
-        JSON.stringify({ ...draft, to: kind === "test" ? account : draft.to }),
+        JSON.stringify({ ...draft, to: kind === "test" ? account : draft.to, cc: kind === "test" ? "" : draft.cc, bcc: kind === "test" ? "" : draft.bcc }),
       );
       attachments.forEach(({ file }) => data.append("attachments", file));
       const response = await fetch(`/api/email/${kind}`, {

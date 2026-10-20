@@ -135,4 +135,7 @@ export const invoicePaymentSchema = z.object({
   notes: optionalText,
   idempotency_key: z.string().uuid(),
 });
+export const paymentReversalSchema = z.object({
+  reason: z.string().trim().min(3).max(1000),
+});
 export const invoiceStatusSchema = z.object({ action: z.enum(["issue", "void"]) });

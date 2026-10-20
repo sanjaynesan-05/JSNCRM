@@ -5,6 +5,7 @@ import { join } from "node:path";
 import multer from "multer";
 import { z } from "zod";
 import { createQuotationPdf } from "../services/quotation-pdf.ts";
+import { localDate } from "../services/date.ts";
 import {
   getDatabase,
   removeDatabaseFile,
@@ -15,6 +16,7 @@ import {
   orderSchema,
   orderStatusSchema,
   paymentSchema,
+  paymentReversalSchema,
   quotationSchema,
   businessProfileSchema,
   taskSchema,
@@ -31,9 +33,9 @@ const restoreUpload = multer({
   limits: { files: 1, fileSize: 200 * 1024 * 1024 },
 });
 const now = () => new Date().toISOString();
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 const ref = (prefix: string) =>
-  `${prefix}-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  `${prefix}-${today().replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
 const bad = (res: any, message: string, status = 400) =>
   res.status(status).json({ error: message });
 const parsed = <S extends z.ZodType>(
@@ -43,6 +45,7 @@ const parsed = <S extends z.ZodType>(
 
 router.get("/dashboard", (_req, res) => {
   const db = getDatabase();
+  const currentDate = today();
   const counts = db
     .prepare(
       `SELECT (SELECT COUNT(*) FROM clients WHERE archived_at IS NULL) clients,
@@ -50,12 +53,12 @@ router.get("/dashboard", (_req, res) => {
     (SELECT COUNT(*) FROM orders WHERE status NOT IN ('closed','cancelled')) active_orders,
     (SELECT COUNT(*) FROM tasks WHERE status IN ('pending','in_progress')) open_tasks,
     (SELECT COUNT(*) FROM invoices WHERE status IN ('draft','issued')) open_invoices,
-    (SELECT COUNT(*) FROM invoices WHERE status='issued' AND due_date<date('now') AND total_minor>(SELECT COALESCE(SUM(amount_minor),0) FROM invoice_payments WHERE invoice_id=invoices.id)) overdue_invoices`,
+    (SELECT COUNT(*) FROM invoices WHERE status='issued' AND due_date<? AND total_minor>(SELECT COALESCE(SUM(ip.amount_minor-COALESCE(pr.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals pr ON pr.invoice_payment_id=ip.id WHERE ip.invoice_id=invoices.id)) overdue_invoices`,
     )
-    .get();
+    .get(currentDate);
   const outstanding = db
     .prepare(
-      `SELECT COALESCE(SUM(o.agreed_amount_minor - COALESCE(p.paid,0)),0) amount_minor FROM orders o LEFT JOIN (SELECT order_id,SUM(amount_minor) paid FROM payments GROUP BY order_id) p ON p.order_id=o.id WHERE o.status NOT IN ('cancelled','closed')`,
+      `SELECT COALESCE(SUM(o.agreed_amount_minor - COALESCE(p.paid,0)),0) amount_minor FROM orders o LEFT JOIN (SELECT p.order_id,SUM(p.amount_minor-COALESCE(r.amount_minor,0)) paid FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id GROUP BY p.order_id) p ON p.order_id=o.id WHERE o.status NOT IN ('cancelled','closed')`,
     )
     .get();
   const upcomingTasks = db
@@ -83,14 +86,15 @@ router.get("/clients/:id", (req, res) => {
   const id = z.string().uuid().safeParse(req.params.id);
   if (!id.success) return bad(res, "Invalid client id.");
   const db = getDatabase();
+  const currentDate = today();
   const client = db.prepare("SELECT * FROM clients WHERE id=?").get(id.data) as any;
   if (!client) return bad(res, "Client not found.", 404);
   const quotations = db.prepare("SELECT id,quotation_number,title,status,total_minor,currency,issue_date,valid_until FROM quotations WHERE client_id=? ORDER BY created_at DESC").all(id.data);
   const invoices = db.prepare(`SELECT i.id,i.invoice_number,i.title,i.total_minor,i.currency,i.issue_date,i.due_date,
-    CASE WHEN i.status='draft' THEN 'draft' WHEN i.status='void' THEN 'void' WHEN COALESCE(p.paid,0)>=i.total_minor THEN 'paid' WHEN i.due_date<date('now') THEN 'overdue' WHEN COALESCE(p.paid,0)>0 THEN 'partially_paid' ELSE 'issued' END status
-    FROM invoices i LEFT JOIN (SELECT invoice_id,SUM(amount_minor) paid FROM invoice_payments GROUP BY invoice_id) p ON p.invoice_id=i.id
-    WHERE i.client_id=? ORDER BY i.created_at DESC`).all(id.data);
-  const orders = db.prepare(`SELECT o.id,o.order_number,o.title,o.status,o.agreed_amount_minor,o.currency,o.order_date,o.due_date,COALESCE(p.paid,0) paid_minor,o.agreed_amount_minor-COALESCE(p.paid,0) outstanding_minor FROM orders o LEFT JOIN (SELECT order_id,SUM(amount_minor) paid FROM payments GROUP BY order_id) p ON p.order_id=o.id WHERE o.client_id=? ORDER BY o.created_at DESC`).all(id.data) as any[];
+    CASE WHEN i.status='draft' THEN 'draft' WHEN i.status='void' THEN 'void' WHEN COALESCE(p.paid,0)>=i.total_minor THEN 'paid' WHEN i.due_date<? THEN 'overdue' WHEN COALESCE(p.paid,0)>0 THEN 'partially_paid' ELSE 'issued' END status
+    FROM invoices i LEFT JOIN (SELECT ip.invoice_id,SUM(ip.amount_minor-COALESCE(pr.amount_minor,0)) paid FROM invoice_payments ip LEFT JOIN payment_reversals pr ON pr.invoice_payment_id=ip.id GROUP BY ip.invoice_id) p ON p.invoice_id=i.id
+    WHERE i.client_id=? ORDER BY i.created_at DESC`).all(currentDate,id.data);
+  const orders = db.prepare(`SELECT o.id,o.order_number,o.title,o.status,o.agreed_amount_minor,o.currency,o.order_date,o.due_date,COALESCE(p.paid,0) paid_minor,o.agreed_amount_minor-COALESCE(p.paid,0) outstanding_minor FROM orders o LEFT JOIN (SELECT p.order_id,SUM(p.amount_minor-COALESCE(r.amount_minor,0)) paid FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id GROUP BY p.order_id) p ON p.order_id=o.id WHERE o.client_id=? ORDER BY o.created_at DESC`).all(id.data) as any[];
   const tasks = db.prepare(`SELECT t.id,t.order_id,o.order_number,t.title,t.status,t.priority,t.due_date,t.completed_at FROM tasks t JOIN orders o ON o.id=t.order_id WHERE o.client_id=? ORDER BY t.due_date IS NULL,t.due_date`).all(id.data);
   const outstanding_minor = orders.filter((o) => !["cancelled", "closed"].includes(o.status)).reduce((sum, o) => sum + o.outstanding_minor, 0);
   res.json({ client, quotations, invoices, orders, tasks, outstanding_minor });
@@ -520,6 +524,7 @@ router.post("/quotations/:id/convert", (req, res) => {
         stamp,
         stamp,
       );
+      db.prepare("INSERT INTO order_status_history(id,order_id,previous_status,new_status,changed_at,metadata) VALUES(?,?,NULL,'new',?,?)").run(randomUUID(),orderId,stamp,JSON.stringify({source:"quotation-conversion"}));
       return db.prepare("SELECT * FROM orders WHERE id=?").get(orderId);
     })();
     res.status(201).json(order);
@@ -537,15 +542,11 @@ router.post("/quotations/:id/convert", (req, res) => {
   }
 });
 
-router.get("/orders", (_req, res) =>
-  res.json(
-    getDatabase()
-      .prepare(
-        `SELECT o.*,c.name client_name,COALESCE(p.paid,0) paid_minor,o.agreed_amount_minor-COALESCE(p.paid,0) outstanding_minor FROM orders o JOIN clients c ON c.id=o.client_id LEFT JOIN (SELECT order_id,SUM(amount_minor) paid FROM payments GROUP BY order_id) p ON p.order_id=o.id ORDER BY o.created_at DESC`,
-      )
-      .all(),
-  ),
-);
+router.get("/orders", (_req, res) => {
+  const db=getDatabase();
+  const rows=db.prepare(`SELECT o.*,c.name client_name,COALESCE(p.paid,0) paid_minor,o.agreed_amount_minor-COALESCE(p.paid,0) outstanding_minor FROM orders o JOIN clients c ON c.id=o.client_id LEFT JOIN (SELECT p.order_id,SUM(p.amount_minor-COALESCE(r.amount_minor,0)) paid FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id GROUP BY p.order_id) p ON p.order_id=o.id ORDER BY o.created_at DESC`).all() as any[];
+  res.json(rows.map(row=>({...row,status_history:db.prepare("SELECT previous_status,new_status,changed_at,metadata FROM order_status_history WHERE order_id=? ORDER BY changed_at,id").all(row.id)})));
+});
 router.post("/orders", (req, res) => {
   const input = parsed(orderSchema, req.body);
   if (!input.success)
@@ -560,22 +561,25 @@ router.post("/orders", (req, res) => {
       .get(d.client_id)
   )
     return bad(res, "Client not found.", 404);
-  db.prepare(
-    `INSERT INTO orders(id,order_number,client_id,title,description,requirements,agreed_amount_minor,priority,order_date,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-  ).run(
-    id,
-    ref("OR"),
-    d.client_id,
-    d.title,
-    d.description || null,
-    d.requirements,
-    d.agreed_amount_minor,
-    d.priority,
-    d.order_date || today(),
-    d.due_date || null,
-    stamp,
-    stamp,
-  );
+  db.transaction(()=>{
+    db.prepare(
+      `INSERT INTO orders(id,order_number,client_id,title,description,requirements,agreed_amount_minor,priority,order_date,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      id,
+      ref("OR"),
+      d.client_id,
+      d.title,
+      d.description || null,
+      d.requirements,
+      d.agreed_amount_minor,
+      d.priority,
+      d.order_date || today(),
+      d.due_date || null,
+      stamp,
+      stamp,
+    );
+    db.prepare("INSERT INTO order_status_history(id,order_id,previous_status,new_status,changed_at,metadata) VALUES(?,?,NULL,'new',?,?)").run(randomUUID(),id,stamp,JSON.stringify({source:"order-creation"}));
+  })();
   res.status(201).json(db.prepare("SELECT * FROM orders WHERE id=?").get(id));
 });
 router.patch("/orders/:id/status", (req, res) => {
@@ -583,15 +587,18 @@ router.patch("/orders/:id/status", (req, res) => {
     input = parsed(orderStatusSchema, req.body);
   if (!id.success || !input.success)
     return bad(res, "Invalid order status request.");
-  const delivered = input.data.status === "delivered" ? now() : null;
-  const info = getDatabase()
-    .prepare(
-      "UPDATE orders SET status=?,delivered_at=COALESCE(?,delivered_at),updated_at=? WHERE id=?",
-    )
-    .run(input.data.status, delivered, now(), id.data);
-  return info.changes
-    ? res.json({ ok: true })
-    : bad(res, "Order not found.", 404);
+  const db=getDatabase(),stamp=now(),delivered=input.data.status === "delivered" ? stamp : null;
+  try {
+    const changed=db.transaction(()=>{
+      const current=db.prepare("SELECT status FROM orders WHERE id=?").get(id.data) as {status:string}|undefined;
+      if(!current)return false;
+      if(current.status===input.data.status)return true;
+      db.prepare("UPDATE orders SET status=?,delivered_at=COALESCE(?,delivered_at),updated_at=? WHERE id=?").run(input.data.status,delivered,stamp,id.data);
+      db.prepare("INSERT INTO order_status_history(id,order_id,previous_status,new_status,changed_at,metadata) VALUES(?,?,?,?,?,NULL)").run(randomUUID(),id.data,current.status,input.data.status,stamp);
+      return true;
+    })();
+    return changed?res.json({ok:true}):bad(res,"Order not found.",404);
+  } catch { return bad(res,"Unable to update order status.",500); }
 });
 router.post("/orders/:id/payments", (req, res) => {
   const id = z.string().uuid().safeParse(req.params.id),
@@ -608,29 +615,22 @@ router.post("/orders/:id/payments", (req, res) => {
       .prepare("SELECT agreed_amount_minor,currency FROM orders WHERE id=?")
       .get(id.data) as any;
   if (!order) return bad(res, "Order not found.", 404);
-  const paid = (
-    db
-      .prepare(
-        "SELECT COALESCE(SUM(amount_minor),0) total FROM payments WHERE order_id=?",
-      )
-      .get(id.data) as any
-  ).total;
-  if (paid + input.data.amount_minor > order.agreed_amount_minor)
-    return bad(res, "Payment exceeds the outstanding balance.");
+  const paid = (db.prepare("SELECT COALESCE(SUM(p.amount_minor-COALESCE(r.amount_minor,0)),0) total FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id WHERE p.order_id=?").get(id.data) as any).total;
+  if (paid + input.data.amount_minor > order.agreed_amount_minor) return bad(res, "Payment exceeds the outstanding balance.");
   const d = input.data,
     stamp = now(),
     pid = randomUUID();
   try {
     db.transaction(() => {
-      const currentPaid=(db.prepare("SELECT COALESCE(SUM(amount_minor),0) total FROM payments WHERE order_id=?").get(id.data) as any).total;
+      const currentPaid=(db.prepare("SELECT COALESCE(SUM(p.amount_minor-COALESCE(r.amount_minor,0)),0) total FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id WHERE p.order_id=?").get(id.data) as any).total;
       if (currentPaid + d.amount_minor > order.agreed_amount_minor) throw new Error("ORDER_EXCESS");
       const paymentDate=d.payment_date||today(), idempotencyKey=d.idempotency_key||randomUUID();
       if (db.prepare("SELECT 1 FROM payments WHERE idempotency_key=?").get(idempotencyKey)) throw new Error("DUPLICATE");
       if (d.reference ? db.prepare("SELECT 1 FROM payments WHERE order_id=? AND lower(trim(reference))=lower(trim(?))").get(id.data,d.reference) : db.prepare("SELECT 1 FROM payments WHERE order_id=? AND amount_minor=? AND payment_date=? AND COALESCE(payment_method,'')=COALESCE(?,'')").get(id.data,d.amount_minor,paymentDate,d.payment_method||null)) throw new Error("DUPLICATE");
-      const invoice = db.prepare("SELECT id,status,total_minor FROM invoices WHERE source_order_id=?").get(id.data) as any;
+      const invoice = db.prepare("SELECT id,status,total_minor FROM invoices WHERE source_order_id=? AND status<>'void' ORDER BY created_at DESC LIMIT 1").get(id.data) as any;
       if (invoice) {
         if (invoice.status !== "issued") throw new Error("INVOICE_NOT_ISSUED");
-        const invoicePaid=(db.prepare("SELECT COALESCE(SUM(amount_minor),0) total FROM invoice_payments WHERE invoice_id=?").get(invoice.id) as any).total;
+        const invoicePaid=(db.prepare("SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) total FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=?").get(invoice.id) as any).total;
         if (invoicePaid + d.amount_minor > invoice.total_minor) throw new Error("INVOICE_EXCESS");
       }
       db.prepare("INSERT INTO payments(id,order_id,amount_minor,currency,payment_date,payment_method,reference,notes,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(pid,id.data,d.amount_minor,order.currency,paymentDate,d.payment_method||null,d.reference||null,d.notes||null,idempotencyKey,stamp,stamp);
@@ -640,11 +640,8 @@ router.post("/orders/:id/payments", (req, res) => {
     const message=error instanceof Error?error.message:"";
     return bad(res,message==="DUPLICATE"?"A payment with this reference and amount already exists.":message==="INVOICE_NOT_ISSUED"?"Issue or void the linked invoice before recording order payments.":message==="INVOICE_EXCESS"?"Payment exceeds the linked invoice balance.":message==="ORDER_EXCESS"?"Payment exceeds the remaining order balance.":"Unable to record payment.",message==="DUPLICATE"||message==="INVOICE_NOT_ISSUED"||message==="INVOICE_EXCESS"||message==="ORDER_EXCESS"?409:500);
   }
-  res.status(201).json({
-    id: pid,
-    paid_minor: paid + d.amount_minor,
-    outstanding_minor: order.agreed_amount_minor - paid - d.amount_minor,
-  });
+  const finalPaid=(db.prepare("SELECT COALESCE(SUM(p.amount_minor-COALESCE(r.amount_minor,0)),0) total FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id WHERE p.order_id=?").get(id.data) as any).total;
+  res.status(201).json({id:pid,paid_minor:finalPaid,outstanding_minor:order.agreed_amount_minor-finalPaid});
 });
 router.get("/orders/:id/payments", (req, res) => {
   const id = z.string().uuid().safeParse(req.params.id);
@@ -652,20 +649,30 @@ router.get("/orders/:id/payments", (req, res) => {
   return res.json(
     getDatabase()
       .prepare(
-        "SELECT * FROM payments WHERE order_id=? ORDER BY payment_date DESC",
+        "SELECT p.*,r.reason reversal_reason,r.reversed_at FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id WHERE p.order_id=? ORDER BY p.payment_date DESC,p.created_at DESC",
       )
       .all(id.data),
   );
 });
-router.get("/tasks", (_req, res) =>
-  res.json(
-    getDatabase()
-      .prepare(
-        "SELECT t.*,o.order_number FROM tasks t LEFT JOIN orders o ON o.id=t.order_id ORDER BY t.due_date IS NULL,t.due_date,t.created_at DESC",
-      )
-      .all(),
-  ),
-);
+router.post("/orders/:id/payments/:paymentId/reverse", (req,res)=>reverseOrderPayment(req,res));
+function reverseOrderPayment(req:any,res:any){
+  const id=z.string().uuid().safeParse(req.params.id),paymentId=z.string().uuid().safeParse(req.params.paymentId),input=paymentReversalSchema.safeParse(req.body);
+  if(!id.success||!paymentId.success||!input.success)return bad(res,input.success?"Invalid payment reversal request.":input.error.issues[0]?.message||"Invalid payment reversal.");
+  const db=getDatabase(),stamp=now();
+  try{db.transaction(()=>{
+    const payment=db.prepare("SELECT * FROM payments WHERE id=? AND order_id=?").get(paymentId.data,id.data) as any;
+    if(!payment)throw new Error("NOT_FOUND");
+    if(db.prepare("SELECT 1 FROM payment_reversals WHERE order_payment_id=?").get(payment.id))throw new Error("REVERSED");
+    const invoicePayment=db.prepare("SELECT ip.id,ip.invoice_id,i.status FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.order_payment_id=?").get(payment.id) as any;
+    if(invoicePayment?.status==="void")throw new Error("VOID_INVOICE");
+    db.prepare("INSERT INTO payment_reversals(id,order_payment_id,invoice_payment_id,amount_minor,reason,reversed_at,created_at) VALUES(?,?,?,?,?,?,?)").run(randomUUID(),payment.id,invoicePayment?.id||null,payment.amount_minor,input.data.reason,stamp,stamp);
+  })();return res.json({ok:true});}catch(error){const message=error instanceof Error?error.message:"";return bad(res,message==="NOT_FOUND"?"Payment not found.":message==="REVERSED"?"This payment has already been reversed.":message==="VOID_INVOICE"?"A payment allocated to a void invoice cannot be reversed here.":"Unable to reverse payment.",message==="NOT_FOUND"?404:message==="REVERSED"||message==="VOID_INVOICE"?409:500);}
+}
+router.get("/tasks", (_req, res) => {
+  const db=getDatabase();
+  const rows=db.prepare("SELECT t.*,o.order_number FROM tasks t LEFT JOIN orders o ON o.id=t.order_id ORDER BY t.due_date IS NULL,t.due_date,t.created_at DESC").all() as any[];
+  res.json(rows.map(row=>({...row,status_history:db.prepare("SELECT previous_status,new_status,changed_at,metadata FROM task_status_history WHERE task_id=? ORDER BY changed_at,id").all(row.id)})));
+});
 router.post("/tasks", (req, res) => {
   const input = parsed(taskSchema, req.body);
   if (!input.success)
@@ -679,20 +686,23 @@ router.post("/tasks", (req, res) => {
     return bad(res, "Order not found.", 404);
   const id = randomUUID(),
     stamp = now();
-  db.prepare(
-    "INSERT INTO tasks(id,order_id,title,description,status,priority,due_date,completed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-  ).run(
-    id,
-    d.order_id || null,
-    d.title,
-    d.description || null,
-    d.status,
-    d.priority,
-    d.due_date || null,
-    d.status === "completed" ? stamp : null,
-    stamp,
-    stamp,
-  );
+  db.transaction(()=>{
+    db.prepare(
+      "INSERT INTO tasks(id,order_id,title,description,status,priority,due_date,completed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+    ).run(
+      id,
+      d.order_id || null,
+      d.title,
+      d.description || null,
+      d.status,
+      d.priority,
+      d.due_date || null,
+      d.status === "completed" ? stamp : null,
+      stamp,
+      stamp,
+    );
+    db.prepare("INSERT INTO task_status_history(id,task_id,previous_status,new_status,changed_at,metadata) VALUES(?,?,NULL,?,?,?)").run(randomUUID(),id,d.status,stamp,JSON.stringify({source:"task-creation"}));
+  })();
   res.status(201).json(db.prepare("SELECT * FROM tasks WHERE id=?").get(id));
 });
 router.patch("/tasks/:id/status", (req, res) => {
@@ -700,15 +710,17 @@ router.patch("/tasks/:id/status", (req, res) => {
     input = parsed(taskStatusSchema, req.body);
   if (!id.success || !input.success)
     return bad(res, "Invalid task status request.");
-  const stamp = input.data.status === "completed" ? now() : null,
-    info = getDatabase()
-      .prepare(
-        "UPDATE tasks SET status=?,completed_at=?,updated_at=? WHERE id=?",
-      )
-      .run(input.data.status, stamp, now(), id.data);
-  return info.changes
-    ? res.json({ ok: true })
-    : bad(res, "Task not found.", 404);
+  const db=getDatabase(),stamp=now(),completed=input.data.status === "completed" ? stamp : null;
+  try{
+    const changed=db.transaction(()=>{
+      const current=db.prepare("SELECT status FROM tasks WHERE id=?").get(id.data) as {status:string}|undefined;
+      if(!current)return false;
+      if(current.status===input.data.status)return true;
+      db.prepare("UPDATE tasks SET status=?,completed_at=?,updated_at=? WHERE id=?").run(input.data.status,completed,stamp,id.data);
+      db.prepare("INSERT INTO task_status_history(id,task_id,previous_status,new_status,changed_at,metadata) VALUES(?,?,?,?,?,NULL)").run(randomUUID(),id.data,current.status,input.data.status,stamp);
+      return true;
+    })();return changed?res.json({ok:true}):bad(res,"Task not found.",404);
+  }catch{return bad(res,"Unable to update task status.",500);}
 });
 
 router.get("/backup", async (_req, res) => {

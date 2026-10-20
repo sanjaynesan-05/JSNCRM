@@ -2,12 +2,13 @@ import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { getDatabase } from "../db/database.ts";
-import { invoicePaymentSchema, invoiceSchema, invoiceStatusSchema } from "../schemas/business.ts";
+import { invoicePaymentSchema, invoiceSchema, invoiceStatusSchema, paymentReversalSchema } from "../schemas/business.ts";
 import { createInvoicePdf } from "../services/invoice-pdf.ts";
+import { localDate } from "../services/date.ts";
 
 const router = Router();
 const now = () => new Date().toISOString();
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate();
 const invalid = (res: any, message: string, status = 400) => res.status(status).json({ error: message });
 const idSchema = z.string().uuid();
 const computedStatus = (invoice: any, paid: number) => {
@@ -19,7 +20,7 @@ const computedStatus = (invoice: any, paid: number) => {
 };
 function detail(db: ReturnType<typeof getDatabase>, id: string) {
   const row = db.prepare(`SELECT i.*,c.name client_name,c.company_name,c.email client_email,c.phone client_phone,c.address client_address,
-    (SELECT COALESCE(SUM(amount_minor),0) FROM invoice_payments WHERE invoice_id=i.id) paid_minor,
+    (SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=i.id) paid_minor,
     COALESCE(p.business_name,'') business_name,COALESCE(p.contact_person,'') contact_person,
     COALESCE(p.email,'') business_email,COALESCE(p.phone,'') business_phone,COALESCE(p.address,'') business_address,COALESCE(p.website,'') business_website
     FROM invoices i JOIN clients c ON c.id=i.client_id LEFT JOIN business_profile p ON p.id=1 WHERE i.id=?`).get(id) as any;
@@ -42,7 +43,7 @@ function detail(db: ReturnType<typeof getDatabase>, id: string) {
     row.business_website = businessSnapshot.website;
   }
   const items = db.prepare("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order").all(id) as any[];
-  const payments = db.prepare("SELECT * FROM invoice_payments WHERE invoice_id=? ORDER BY payment_date DESC,created_at DESC").all(id) as any[];
+  const payments = db.prepare("SELECT ip.*,pr.reason reversal_reason,pr.reversed_at FROM invoice_payments ip LEFT JOIN payment_reversals pr ON pr.invoice_payment_id=ip.id WHERE ip.invoice_id=? ORDER BY ip.payment_date DESC,ip.created_at DESC").all(id) as any[];
   const history = db.prepare("SELECT previous_status,new_status,changed_at,metadata FROM invoice_status_history WHERE invoice_id=? ORDER BY changed_at").all(id);
   const status = computedStatus(row, row.paid_minor);
   return { ...row, items, payments, status, balance_minor: Math.max(0, row.total_minor - row.paid_minor), history };
@@ -75,7 +76,7 @@ router.get("/", (req, res) => {
   const db = getDatabase();
   const dateField=filters.data.date_field==="due"?"i.due_date":"i.issue_date";
   const rows = db.prepare(`SELECT i.*,c.name client_name,
-    (SELECT COALESCE(SUM(amount_minor),0) FROM invoice_payments WHERE invoice_id=i.id) paid_minor
+    (SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=i.id) paid_minor
     FROM invoices i JOIN clients c ON c.id=i.client_id
     WHERE (?='' OR i.invoice_number LIKE ? OR c.name LIKE ? OR COALESCE(c.company_name,'') LIKE ?)
     AND (? IS NULL OR ${dateField}>=?) AND (? IS NULL OR ${dateField}<=?)
@@ -105,6 +106,8 @@ router.post("/", (req, res) => {
         clientId = order.client_id;
         title = order.title;
         items = [{ description: order.title, quantity: 1, unit_price_minor: order.agreed_amount_minor, discount_minor: 0 }];
+        if (d.discount_minor !== 0) throw new Error("ORDER_TOTAL_MISMATCH");
+        discount = 0;
         if (db.prepare("SELECT 1 FROM invoices WHERE source_order_id=?").get(order.id)) throw new Error("DUPLICATE_SOURCE");
         if (order.quotation_id && db.prepare("SELECT 1 FROM invoices WHERE source_quotation_id=?").get(order.quotation_id)) throw new Error("DUPLICATE_SOURCE");
         if (order.currency !== "INR") throw new Error("UNSUPPORTED_CURRENCY");
@@ -127,12 +130,16 @@ router.post("/", (req, res) => {
       if (!d.source_order_id && !d.source_quotation_id && !db.prepare("SELECT 1 FROM clients WHERE id=? AND archived_at IS NULL").get(clientId)) throw new Error("CLIENT_ARCHIVED");
       const subtotal = itemSubtotal(items);
       if (discount > subtotal || subtotal - discount <= 0) throw new Error("INVALID_TOTAL");
+      if (sourceOrderId) {
+        const sourceOrder = db.prepare("SELECT agreed_amount_minor FROM orders WHERE id=?").get(sourceOrderId) as any;
+        if (!sourceOrder || subtotal - discount !== sourceOrder.agreed_amount_minor) throw new Error("ORDER_TOTAL_MISMATCH");
+      }
       const number = nextNumber(db, d.issue_date.slice(0, 4));
       db.prepare(`INSERT INTO invoices(id,invoice_number,client_id,source_order_id,source_quotation_id,reissued_from_id,title,subtotal_minor,discount_minor,total_minor,issue_date,due_date,terms,notes,status,created_at,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?)`).run(id, number, clientId, sourceOrderId, d.source_quotation_id || null, d.reissued_from_id || null, title, subtotal, discount, subtotal - discount, d.issue_date, d.due_date || null, d.terms || null, d.notes || null, stamp, stamp);
       saveItems(db, id, items);
       if (sourceOrderId) {
-        const existingPayments = db.prepare("SELECT * FROM payments WHERE order_id=? ORDER BY payment_date,created_at").all(sourceOrderId) as any[];
+        const existingPayments = db.prepare("SELECT p.* FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id WHERE p.order_id=? AND r.id IS NULL ORDER BY p.payment_date,p.created_at").all(sourceOrderId) as any[];
         const existingTotal = existingPayments.reduce((sum, payment) => sum + payment.amount_minor, 0);
         if (existingTotal > subtotal - discount) throw new Error("ORDER_ALREADY_PAID");
         const allocate = db.prepare("INSERT INTO invoice_payments(id,invoice_id,order_payment_id,amount_minor,payment_date,payment_method,reference,notes,idempotency_key,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)");
@@ -143,7 +150,7 @@ router.post("/", (req, res) => {
     res.status(201).json(detail(db, id));
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    return invalid(res, message === "SOURCE_NOT_FOUND" ? "Source record not found." : message === "CLIENT_NOT_FOUND" ? "Client not found." : message === "CLIENT_ARCHIVED" ? "Restore the archived client before creating a direct invoice." : message === "SOURCE_NOT_ACCEPTED" ? "Only accepted quotations can be invoiced." : message === "DUPLICATE_SOURCE" ? "An invoice already exists for this source record." : message === "UNSUPPORTED_CURRENCY" ? "Only INR orders can be invoiced currently." : message === "ORDER_ALREADY_PAID" ? "Existing order payments exceed the invoice total and cannot be allocated safely." : message === "INVALID_TOTAL" ? "Invoice total is invalid or exceeds the allowed amount." : "Unable to create invoice.", message === "SOURCE_NOT_FOUND" || message === "CLIENT_NOT_FOUND" ? 404 : message === "DUPLICATE_SOURCE" || message === "SOURCE_NOT_ACCEPTED" || message === "ORDER_ALREADY_PAID" ? 409 : 400);
+    return invalid(res, message === "SOURCE_NOT_FOUND" ? "Source record not found." : message === "CLIENT_NOT_FOUND" ? "Client not found." : message === "CLIENT_ARCHIVED" ? "Restore the archived client before creating a direct invoice." : message === "SOURCE_NOT_ACCEPTED" ? "Only accepted quotations can be invoiced." : message === "DUPLICATE_SOURCE" ? "An invoice already exists for this source record." : message === "UNSUPPORTED_CURRENCY" ? "Only INR orders can be invoiced currently." : message === "ORDER_ALREADY_PAID" ? "Existing order payments exceed the invoice total and cannot be allocated safely." : message === "ORDER_TOTAL_MISMATCH" ? "An order-linked invoice must match the agreed order amount and cannot include a discount." : message === "INVALID_TOTAL" ? "Invoice total is invalid or exceeds the allowed amount." : "Unable to create invoice.", message === "SOURCE_NOT_FOUND" || message === "CLIENT_NOT_FOUND" ? 404 : message === "DUPLICATE_SOURCE" || message === "SOURCE_NOT_ACCEPTED" || message === "ORDER_ALREADY_PAID" || message === "ORDER_TOTAL_MISMATCH" ? 409 : 400);
   }
 });
 router.put("/:id", (req, res) => {
@@ -161,7 +168,7 @@ router.put("/:id", (req, res) => {
       if (rows.some((n) => !Number.isSafeInteger(n) || n < 0)) throw new Error("INVALID_TOTAL");
       const subtotal = rows.reduce((a,b)=>a+b,0);
       if (!Number.isSafeInteger(subtotal) || d.discount_minor > subtotal || subtotal-d.discount_minor<=0) throw new Error("INVALID_TOTAL");
-      const paid=(db.prepare("SELECT COALESCE(SUM(amount_minor),0) total FROM invoice_payments WHERE invoice_id=?").get(id.data) as any).total;
+      const paid=(db.prepare("SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) total FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=?").get(id.data) as any).total;
       if(subtotal-d.discount_minor<paid)throw new Error("PAID_EXCEEDS");
       if(existing.source_order_id){const order=db.prepare("SELECT agreed_amount_minor FROM orders WHERE id=?").get(existing.source_order_id) as any;if(subtotal-d.discount_minor!==order.agreed_amount_minor)throw new Error("ORDER_TOTAL_IMMUTABLE");}
       db.prepare("DELETE FROM invoice_items WHERE invoice_id=?").run(id.data);
@@ -181,14 +188,14 @@ router.patch("/:id/status", (req, res) => {
       if (!invoice) throw new Error("NOT_FOUND");
       if (input.data.action === "issue") {
         if (invoice.status !== "draft") throw new Error("TRANSITION");
-        const paid = (db.prepare("SELECT COALESCE(SUM(amount_minor),0) n FROM invoice_payments WHERE invoice_id=?").get(id.data) as any).n;
+        const paid = (db.prepare("SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) n FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=?").get(id.data) as any).n;
         if (paid > 0 && !invoice.source_order_id) throw new Error("PAYMENTS_EXIST");
         const client = db.prepare("SELECT name,company_name,email,phone,address FROM clients WHERE id=?").get(invoice.client_id);
         const business = db.prepare("SELECT business_name,contact_person,email,phone,address,website FROM business_profile WHERE id=1").get();
         db.prepare("UPDATE invoices SET status='issued',issued_at=?,client_snapshot=?,business_snapshot=?,updated_at=? WHERE id=?").run(stamp,JSON.stringify(client),JSON.stringify(business),stamp,id.data);
       } else {
         if (invoice.status !== "issued") throw new Error("TRANSITION");
-        const paid = (db.prepare("SELECT COALESCE(SUM(amount_minor),0) n FROM invoice_payments WHERE invoice_id=?").get(id.data) as any).n;
+        const paid = (db.prepare("SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) n FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=?").get(id.data) as any).n;
         if (paid > 0) throw new Error("PAYMENTS_EXIST");
         db.prepare("UPDATE invoices SET status='void',voided_at=?,updated_at=? WHERE id=?").run(stamp,stamp,id.data);
       }
@@ -226,12 +233,12 @@ router.post("/:id/payments", (req, res) => {
       if(db.prepare("SELECT 1 FROM invoice_payments WHERE idempotency_key=?").get(d.idempotency_key)) throw new Error("DUPLICATE");
       if(d.reference && db.prepare("SELECT 1 FROM invoice_payments WHERE invoice_id=? AND lower(trim(reference))=lower(trim(?))").get(id.data,d.reference)) throw new Error("DUPLICATE_REFERENCE");
       if(!d.reference && db.prepare("SELECT 1 FROM invoice_payments WHERE invoice_id=? AND amount_minor=? AND payment_date=? AND COALESCE(payment_method,'')=COALESCE(?,'')").get(id.data,d.amount_minor,d.payment_date,d.payment_method||null)) throw new Error("DUPLICATE");
-      const paid=(db.prepare("SELECT COALESCE(SUM(amount_minor),0) n FROM invoice_payments WHERE invoice_id=?").get(id.data) as any).n;
+      const paid=(db.prepare("SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) n FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=?").get(id.data) as any).n;
       if(d.amount_minor>invoice.total_minor-paid) throw new Error("EXCESS");
       let orderPaymentId:string|null=null;
       if(invoice.source_order_id){
         const order=db.prepare("SELECT agreed_amount_minor,currency FROM orders WHERE id=?").get(invoice.source_order_id) as any;
-        const orderPaid=(db.prepare("SELECT COALESCE(SUM(amount_minor),0) n FROM payments WHERE order_id=?").get(invoice.source_order_id) as any).n;
+        const orderPaid=(db.prepare("SELECT COALESCE(SUM(p.amount_minor-COALESCE(r.amount_minor,0)),0) n FROM payments p LEFT JOIN payment_reversals r ON r.order_payment_id=p.id WHERE p.order_id=?").get(invoice.source_order_id) as any).n;
         if(d.amount_minor>order.agreed_amount_minor-orderPaid) throw new Error("ORDER_EXCESS");
         if(d.reference && db.prepare("SELECT 1 FROM payments WHERE order_id=? AND lower(trim(reference))=lower(trim(?)) AND amount_minor=?").get(invoice.source_order_id,d.reference,d.amount_minor)) throw new Error("DUPLICATE_REFERENCE");
         orderPaymentId=paymentId;
@@ -241,6 +248,32 @@ router.post("/:id/payments", (req, res) => {
       return detail(db,id.data);
     })(); return res.status(201).json(result);
   } catch(error){ const m=error instanceof Error?error.message:""; return invalid(res,m==="NOT_FOUND"?"Invoice not found.":m==="NOT_ISSUED"?"Payments can only be recorded on issued invoices.":m==="DUPLICATE"?"This payment submission was already recorded.":m==="EXCESS"?"Payment exceeds the invoice balance.":m==="ORDER_EXCESS"?"Payment exceeds the remaining order balance.":m==="DUPLICATE_REFERENCE"?"A payment with this reference is already recorded for the invoice.":"Unable to record payment.",m==="NOT_FOUND"?404:m==="NOT_ISSUED"||m==="DUPLICATE"||m==="EXCESS"||m==="ORDER_EXCESS"||m==="DUPLICATE_REFERENCE"?409:500); }
+});
+router.post("/:id/payments/:paymentId/reverse", (req,res)=>{
+  const id=idSchema.safeParse(req.params.id),paymentId=idSchema.safeParse(req.params.paymentId),input=paymentReversalSchema.safeParse(req.body);
+  if(!id.success||!paymentId.success||!input.success)return invalid(res,!input.success?input.error.issues[0]?.message||"Invalid payment reversal.":"Invalid payment reversal request.");
+  const db=getDatabase(),stamp=now();
+  try{
+    db.transaction(()=>{
+      const invoice=db.prepare("SELECT status FROM invoices WHERE id=?").get(id.data) as any;
+      if(!invoice)throw new Error("NOT_FOUND");
+      if(invoice.status==="void")throw new Error("VOID_INVOICE");
+      const payment=db.prepare("SELECT * FROM invoice_payments WHERE id=? AND invoice_id=?").get(paymentId.data,id.data) as any;
+      if(!payment)throw new Error("PAYMENT_NOT_FOUND");
+      if(db.prepare("SELECT 1 FROM payment_reversals WHERE invoice_payment_id=?").get(payment.id))throw new Error("REVERSED");
+      if(payment.order_payment_id){
+        const linked=db.prepare("SELECT id FROM payments WHERE id=?").get(payment.order_payment_id) as any;
+        if(!linked)throw new Error("LINK_MISSING");
+        db.prepare("INSERT INTO payment_reversals(id,order_payment_id,invoice_payment_id,amount_minor,reason,reversed_at,created_at) VALUES(?,?,?,?,?,?,?)").run(randomUUID(),payment.order_payment_id,payment.id,payment.amount_minor,input.data.reason,stamp,stamp);
+      }else{
+        db.prepare("INSERT INTO payment_reversals(id,order_payment_id,invoice_payment_id,amount_minor,reason,reversed_at,created_at) VALUES(?,NULL,?,?,?,?,?)").run(randomUUID(),payment.id,payment.amount_minor,input.data.reason,stamp,stamp);
+      }
+    })();
+    return res.json(detail(db,id.data));
+  }catch(error){
+    const message=error instanceof Error?error.message:"";
+    return invalid(res,message==="NOT_FOUND"?"Invoice not found.":message==="PAYMENT_NOT_FOUND"?"Payment not found.":message==="VOID_INVOICE"?"Payments allocated to a void invoice cannot be reversed here.":message==="REVERSED"?"This payment has already been reversed.":"Unable to reverse payment.",message==="NOT_FOUND"||message==="PAYMENT_NOT_FOUND"?404:message==="VOID_INVOICE"||message==="REVERSED"?409:500);
+  }
 });
 router.get("/:id/pdf", (req,res)=>{
   const id=idSchema.safeParse(req.params.id); if(!id.success)return invalid(res,"Invalid invoice id.");

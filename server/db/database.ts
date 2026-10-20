@@ -14,6 +14,9 @@ import { fileURLToPath } from "node:url";
 
 export type Db = InstanceType<typeof Database>;
 const migrationsDir = fileURLToPath(new URL("./migrations/", import.meta.url));
+const readMigrations = () => readdirSync(migrationsDir)
+  .filter((name) => /^\d+_.*\.sql$/.test(name))
+  .sort((a, b) => Number(a.slice(0, 3)) - Number(b.slice(0, 3)));
 let current: Db | undefined;
 let currentPath: string | undefined;
 export function openDatabase(
@@ -43,9 +46,7 @@ export function openDatabase(
       }[]
     ).map((r) => r.version),
   );
-  const migrations = readdirSync(migrationsDir)
-    .filter((name) => /^\d+_.*\.sql$/.test(name))
-    .sort((a, b) => Number(a.slice(0, 3)) - Number(b.slice(0, 3)));
+  const migrations = readMigrations();
   for (const name of migrations) {
     const version = Number(name.slice(0, 3));
     if (applied.has(version)) continue;
@@ -118,12 +119,55 @@ export function restoreDatabase(backupPath: string) {
       "payments",
       "tasks",
     ];
+    const migrationVersions = check.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as { version: number }[];
+    const appliedVersions = migrationVersions.map((row) => row.version);
+    const claimedVersion = appliedVersions[appliedVersions.length - 1] ?? 0;
+    const supportedVersions = readMigrations().map((name) => Number(name.slice(0, 3)));
+    const latestSupportedVersion = supportedVersions[supportedVersions.length - 1] ?? 0;
+    const expectedAppliedVersions = supportedVersions.filter((version) => version <= claimedVersion);
+    const versionedTables: Record<number, string[]> = {
+      2: ["quotation_status_history", "business_profile"],
+      3: ["invoices", "invoice_items", "invoice_payments", "invoice_status_history", "invoice_number_sequences"],
+      4: ["order_status_history", "task_status_history", "payment_reversals"],
+    };
+    const requiredForClaimedVersion = Object.entries(versionedTables)
+      .filter(([version]) => Number(version) <= claimedVersion)
+      .flatMap(([, names]) => names);
+    const requiredColumns: Record<string, string[]> = {
+      schema_migrations: ["version", "applied_at"],
+      clients: ["id", "client_code", "name", "archived_at"],
+      quotations: ["id", "client_id", "status", "total_minor"],
+      quotation_items: ["id", "quotation_id", "line_total_minor"],
+      orders: ["id", "client_id", "status", "agreed_amount_minor"],
+      payments: ["id", "order_id", "amount_minor"],
+      tasks: ["id", "status"],
+      quotation_status_history: ["quotation_id", "new_status"],
+      business_profile: ["id", "business_name"],
+      invoices: ["id", "status", "total_minor"],
+      invoice_items: ["id", "invoice_id", "line_total_minor"],
+      invoice_payments: ["id", "invoice_id", "amount_minor"],
+      invoice_status_history: ["invoice_id", "new_status"],
+      invoice_number_sequences: ["year", "last_number"],
+      order_status_history: ["order_id", "new_status"],
+      task_status_history: ["task_id", "new_status"],
+      payment_reversals: ["order_payment_id", "invoice_payment_id", "amount_minor", "reason", "reversed_at"],
+    };
+    const requiredColumnEntries = Object.entries(requiredColumns)
+      .filter(([table]) => requiredTables.concat(requiredForClaimedVersion).includes(table));
+    const hasRequiredColumns = requiredColumnEntries.every(([table, columns]) => {
+      const actual = new Set((check.pragma(`table_info(${table})`) as { name: string }[]).map((column) => column.name));
+      return columns.every((column) => actual.has(column));
+    });
     if (
       (check.pragma("integrity_check") as { integrity_check: string }[])[0]
         ?.integrity_check !== "ok" ||
       (check.pragma("foreign_key_check") as unknown[]).length > 0 ||
-      !check.prepare("SELECT 1 FROM schema_migrations WHERE version=1").get() ||
-      requiredTables.some((name) => !tables.has(name))
+      claimedVersion < 1 ||
+      claimedVersion > latestSupportedVersion ||
+      expectedAppliedVersions.length !== appliedVersions.length ||
+      expectedAppliedVersions.some((version, index) => version !== appliedVersions[index]) ||
+      requiredTables.concat(requiredForClaimedVersion).some((name) => !tables.has(name)) ||
+      !hasRequiredColumns
     )
       throw new Error("Invalid backup database.");
   } finally {

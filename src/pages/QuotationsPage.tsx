@@ -8,6 +8,7 @@ import type {
   QuotationInput,
   QuotationStatus,
 } from "../types/business";
+import { localDate } from "../services/date";
 
 const statusOptions: QuotationStatus[] = [
   "draft",
@@ -21,7 +22,7 @@ const money = (minor: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(
     minor / 100,
   );
-const dateToday = () => new Date().toISOString().slice(0, 10);
+const dateToday = () => localDate();
 type ItemDraft = { description: string; quantity: string; unit_price: string };
 type FormDraft = {
   client_id: string;

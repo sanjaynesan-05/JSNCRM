@@ -92,7 +92,9 @@ export type Order = {
   delivered_at: string | null;
   paid_minor: number;
   outstanding_minor: number;
+  status_history?: StatusChange[];
 };
+export type StatusChange = { previous_status: string | null; new_status: string; changed_at: string; metadata: string | null };
 export type Payment = {
   id: string;
   order_id: string;
@@ -102,6 +104,8 @@ export type Payment = {
   payment_method: string | null;
   reference: string | null;
   notes: string | null;
+  reversal_reason?: string | null;
+  reversed_at?: string | null;
 };
 export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 export type Task = {
@@ -114,4 +118,5 @@ export type Task = {
   priority: Priority;
   due_date: string | null;
   completed_at: string | null;
+  status_history?: StatusChange[];
 };

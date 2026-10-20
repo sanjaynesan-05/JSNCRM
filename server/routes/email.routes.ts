@@ -48,6 +48,7 @@ router.get("/config", (_request, response) =>
 const handleSend = (test: boolean) => [
   upload.array("attachments", 10),
   async (request: any, response: any) => {
+    let sending = false;
     try {
       const raw = JSON.parse(request.body.payload || "{}");
       const validation = emailPayloadSchema.safeParse(raw);
@@ -57,9 +58,15 @@ const handleSend = (test: boolean) => [
             validation.error.issues[0]?.message || "Invalid email payload.",
         });
       const payload = validation.data as unknown as EmailDraft;
-      const recipients = list(payload.to);
-      const cc = list(payload.cc),
-        bcc = list(payload.bcc);
+      if (test && !isConfigured)
+        return response
+          .status(503)
+          .json({ error: "Gmail is not configured for test sending." });
+      // A test message is always sent only to the configured sender account.
+      // Do not allow stale To, CC, or BCC fields to leak it to other recipients.
+      const recipients = test ? [gmailUser] : list(payload.to);
+      const cc = test ? [] : list(payload.cc),
+        bcc = test ? [] : list(payload.bcc);
       if (
         !recipients.length ||
         ![...recipients, ...cc, ...bcc].every((email) =>
@@ -69,10 +76,6 @@ const handleSend = (test: boolean) => [
         return response
           .status(400)
           .json({ error: "Enter valid email addresses for To, CC, and BCC." });
-      if (test && !isConfigured)
-        return response
-          .status(503)
-          .json({ error: "Gmail is not configured for test sending." });
       const files: {
         filename: string;
         content: Buffer;
@@ -90,10 +93,11 @@ const handleSend = (test: boolean) => [
         contentType: "image/png",
         cid: "jsn-logo",
       });
+      sending = true;
       await sendMail({
         to: recipients.join(", "),
-        cc: list(payload.cc).join(", ") || undefined,
-        bcc: list(payload.bcc).join(", ") || undefined,
+        cc: cc.join(", ") || undefined,
+        bcc: bcc.join(", ") || undefined,
         subject: payload.subject.trim(),
         html: generateEmailHtml(payload, "cid:jsn-logo"),
         attachments: files,
@@ -102,8 +106,11 @@ const handleSend = (test: boolean) => [
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to send email";
+      if (sending) console.error("Email delivery failed:", message);
       return response
-        .status(message.startsWith("Gmail is not") ? 503 : 400)
+        .status(
+          message.startsWith("Gmail is not") ? 503 : sending ? 502 : 400,
+        )
         .json({ error: message });
     }
   },

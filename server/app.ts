@@ -19,8 +19,9 @@ export function createApp() {
   );
   app.use((req, res, next) => {
     if (["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) {
-      const host = req.get("host")?.split(":")[0]?.toLowerCase();
-      if (host && !["127.0.0.1", "localhost", "[::1]"].includes(host))
+      const rawHost = req.get("host")?.toLowerCase() || "";
+      const host = rawHost.startsWith("[") ? rawHost.slice(1, rawHost.indexOf("]")) : rawHost.split(":")[0];
+      if (host && !["127.0.0.1", "localhost", "::1"].includes(host))
         return res
           .status(403)
           .json({
