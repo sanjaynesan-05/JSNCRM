@@ -47,6 +47,15 @@ test("invoice lifecycle, immutable PDF snapshots, and shared order-payment alloc
   const immutable=await call(`/invoices/${invoice.id}`,"PUT",{client_id:client.id,title:"Changed",items:[{description:"Changed",quantity:1,unit_price_minor:1,discount_minor:0}],discount_minor:0,issue_date:"2020-01-01"});assert.equal(immutable.status,409);
   const paid=await call(`/invoices/${invoice.id}/payments`,"POST",{amount_minor:15000,payment_date:"2020-01-04",idempotency_key:"a9e8d1a9-e8c4-4166-90ae-36f60ec863e2"});assert.equal(paid.status,201);assert.equal(paid.data.status,"paid");assert.equal(paid.data.balance_minor,0);
 
+  const quotationResponse=await call("/quotations","POST",{client_id:client.id,title:"Accepted quotation",items:[{description:"Brand package",quantity:2,unit_price_minor:7500}],discount_type:"percentage",discount_value:10,issue_date:"2020-03-01"});assert.equal(quotationResponse.status,201);
+  const quotation=quotationResponse.data as any;
+  assert.equal((await call(`/quotations/${quotation.id}/status`,"PATCH",{status:"sent"})).status,200);
+  assert.equal((await call(`/quotations/${quotation.id}/status`,"PATCH",{status:"accepted"})).status,200);
+  const quotationInvoice=await call("/invoices","POST",{client_id:client.id,source_quotation_id:quotation.id,title:"ignored",items:[{description:"ignored",quantity:1,unit_price_minor:1,discount_minor:0}],discount_minor:0,issue_date:"2020-03-01",confirm_source:true});
+  assert.equal(quotationInvoice.status,201);assert.equal(quotationInvoice.data.subtotal_minor,15000);assert.equal(quotationInvoice.data.discount_minor,1500);assert.equal(quotationInvoice.data.total_minor,13500);assert.equal(quotationInvoice.data.source_quotation_id,quotation.id);assert.equal(quotationInvoice.data.items[0].description,"Brand package");assert.equal(quotationInvoice.data.items[0].quantity,2);
+  const repeatedQuotationInvoice=await call("/invoices","POST",{client_id:client.id,source_quotation_id:quotation.id,title:"again",items:[{description:"x",quantity:1,unit_price_minor:1,discount_minor:0}],issue_date:"2020-03-01",confirm_source:true});
+  assert.equal(repeatedQuotationInvoice.status,409);
+
   const orderResponse=await call("/orders","POST",{client_id:client.id,title:"Order backed work",agreed_amount_minor:30000,priority:"normal",order_date:"2020-02-01"});assert.equal(orderResponse.status,201);const order=orderResponse.data as any;
   const existing=await call(`/orders/${order.id}/payments`,"POST",{amount_minor:5000,payment_date:"2020-02-02",payment_method:"UPI",reference:"ORDER-1"});assert.equal(existing.status,201);
   const linked=await call("/invoices","POST",{client_id:client.id,source_order_id:order.id,title:"ignored",items:[{description:"ignored",quantity:1,unit_price_minor:1,discount_minor:0}],discount_minor:0,issue_date:"2020-02-01",confirm_source:true});assert.equal(linked.status,201);assert.equal(linked.data.total_minor,30000);assert.equal(linked.data.paid_minor,5000);

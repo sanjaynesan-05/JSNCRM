@@ -60,10 +60,16 @@ Copy `.env.example` to `.env`. Values are read by the backend at startup.
 | `CLIENT_URL`         | `http://localhost:5173`                                                 | Browser origin permitted by CORS and state-changing request checks.      |
 | `DATABASE_PATH`      | `%LOCALAPPDATA%\JSN Designs Business Studio\business.sqlite` on Windows | SQLite database file. Set an absolute path if you want another location. |
 | `BACKUP_DIR`         | `%LOCALAPPDATA%\JSN Designs Business Studio\backups` on Windows         | Folder for generated backup snapshots.                                   |
+| `RAZORPAY_KEY_ID` | Empty | Server-only Razorpay key ID. Use a test-mode key for development. |
+| `RAZORPAY_KEY_SECRET` | Empty | Server-only Razorpay API secret. Never add it to Vite/client variables. |
+| `RAZORPAY_WEBHOOK_SECRET` | Empty | Independent signing secret configured for Razorpay webhook verification. |
+| `RAZORPAY_MODE` | `test` | Explicit mode label; the app never switches to live automatically. |
+| `RAZORPAY_WEBHOOK_PUBLIC_URL` | Empty | Optional HTTPS webhook URL for a hosted deployment. |
+| `APP_BASE_URL` | `http://localhost:5173` | Application URL placeholder for deployment configuration. |
 
 On systems without `LOCALAPPDATA` or `APPDATA`, the database and backup folders default to `JSN Designs Business Studio` under the current working directory. The restore upload staging directory also lives under the local application data folder (or current working directory fallback). Database files are kept outside frontend source, public assets, and generated frontend bundles.
 
-Restart the API after changing `.env`. Do not put secrets in `VITE_` variables: Vite variables are available to frontend code.
+Restart the API after changing `.env`. Do not put secrets in `VITE_` variables: Vite variables are available to frontend code. Payment workflows remain disabled until both Razorpay API credentials are configured.
 
 ## Application guide
 
@@ -107,7 +113,7 @@ Quotation dashboard amounts show the total value of displayed quotations; accept
 
 The Invoices screen supports direct draft invoices and confirmed creation from accepted quotations or orders. A source can have one non-void invoice; orders converted from a quotation keep both source links, and the same source cannot be invoiced once through the quote and again through the order. Drafts can be edited; issuing stores client and business contact snapshots, locks commercial fields, and adds a status-history record. An issued invoice may be voided only before payment; a void invoice can produce a linked reissue draft. Paid and outstanding states are derived from persisted payments and due dates. Invoice numbers are allocated transactionally in `INV-YYYY-NNNN` form using the issue year.
 
-All invoice values currently use INR paise. Tax is not calculated and this is a non-GST baseline; GST registration, place-of-supply, rate, and tax breakdown requirements have not been established. Payment instructions are not yet configurable separately from invoice terms. Invoice PDFs are generated from persisted items and the issue-time client/business snapshots, contain totals, amount paid, balance due, and terms, and do not mutate invoice state. Complex-script PDF shaping remains unsupported. Download the PDF and attach/review it manually in Email Studio; no invoice email is sent automatically.
+All invoice values currently use INR paise. Tax is not calculated and this is a non-GST baseline; GST registration, place-of-supply, rate, and tax breakdown requirements have not been established. Invoice PDFs are generated from persisted items and the issue-time client/business snapshots, contain totals, amount paid, balance due, and terms, and do not mutate invoice state. Complex-script PDF shaping remains unsupported. Users can download the PDF for manual handling or use the invoice payment-email action to attach it and send it through configured Gmail SMTP.
 
 PDF rendering investigation: PDFKit can embed TTF/TTC fonts and the installed Fontkit dependency contains Indic shaping paths for Tamil and Devanagari. The current PDF services still replace non-Latin characters and use standard fonts, so that capability is not enabled or claimed. A follow-up should prototype licensed Noto fonts and verify visual output, wrapping, and extracted text before support is enabled. See [PDFKit font embedding](https://pdfkit.org/docs/text.html), [Fontkit shaping source](https://github.com/foliojs/fontkit/tree/master/src/opentype/shapers), and [HarfBuzz script coverage](https://harfbuzz.github.io/what-does-harfbuzz-do.html).
 
@@ -318,10 +324,38 @@ Payment example:
 | `POST` | `/invoices/:id/payments` | Record an issued invoice payment; requires `amount_minor`, `payment_date`, and a UUID `idempotency_key`. |
 | `POST` | `/invoices/:id/payments/:paymentId/reverse` | Reverse a full payment with a required reason; linked order and invoice balances update together. |
 | `GET` | `/invoices/:id/pdf` | Download a PDF from persisted invoice data and issue snapshots; drafts have no customer PDF. |
+| `GET` | `/invoices/:id/payments` | Verified payment summary, refunds, gateway links/attempts, email history and latest verification time. |
+| `POST` | `/invoices/:id/payment-links` | Create or reuse an advance, balance, or flexible partial Razorpay Payment Link. Amounts are computed/validated against the current server-side balance. |
+| `POST` | `/invoices/:id/payment-links/:linkId/cancel` | Cancel an open Razorpay link after confirmation so it cannot collect further payments. |
+| `POST` | `/invoices/:id/payment-status/refresh` | Fetch the stored Payment Links from Razorpay and reconcile individual payments. Temporary failures return `stale: true` without removing prior verified payments. |
+| `POST` | `/invoices/:id/send` | Generate the existing invoice PDF, attach it, and send through Gmail SMTP with a link; request an existing `payment_link_id` to resend without creating another link. |
+| `POST` | `/webhooks/razorpay` | Raw-body HMAC verified webhook receiver with event-ID deduplication and retry of previously failed event processing. |
 
 For invoices linked to orders, payment creation also creates exactly one existing order payment and the invoice ledger entry references it. This endpoint and `/orders/:id/payments` use a transaction and reject repeat references, duplicate submission keys, and amounts beyond the remaining invoice/order balance. Order-linked invoices must equal the agreed order amount and cannot be discounted. Payments can be fully reversed with a reason through either the order or invoice payment history; a linked payment is reversed in both ledgers. The invoice list uses derived status; database status history stores only draft, issued, and void transitions. Invoice numbering is unique and generated in the server transaction by issue year.
 
 This records ₹500.00. Payments inherit the order currency; this milestone defaults to INR.
+
+### Razorpay payment collection and invoice email
+
+Payment collection uses Razorpay's standard hosted Payment Links API. The server stores link references, gateway payment attempts and successful captured payments in the existing `invoice_payments` ledger. Only server-to-server fetched `captured` payment records increase paid totals; browser redirects and failed/authorized attempts do not. Link creation supports a fixed advance, the full outstanding balance, or flexible partial payments (`accept_partial` with a minimum of ₹1.00). Payment Links do not carry a UPI-only restriction; UPI, cards and net banking availability depends on the Razorpay merchant account and its enabled methods. Partial payments use the standard link because UPI-only links do not support the needed partial-payment behavior.
+
+Payment refunds are recorded separately and reduce the net paid balance without deleting the successful payment. The current integration consumes processed refund webhook records; refund initiation remains in Razorpay Dashboard and is not exposed as an application action. Existing manual invoice receipt and reversal workflows are retained.
+
+Invoice details offer link creation, copy/open actions, gateway payment-attempt history, status refresh, and an invoice email action. It reuses a valid balance link or accepts a link ID on retry. The email service sends the existing snapshot-based invoice PDF as an actual attachment with the amounts, due date and hosted checkout URL. Delivery history records SMTP acceptance or failure. SMTP acceptance does not confirm recipient inbox delivery. A created payment link is retained if SMTP fails.
+
+#### Test-mode setup
+
+1. Create or sign in to a Razorpay account and use its **Test Mode** dashboard to obtain test API Key ID and Key Secret. Do not use live credentials for local verification.
+2. Copy `.env.example` to `.env` if it does not exist and set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_MODE=test` locally. Keep `.env` untracked. Keep SMTP values separate and optional until you intend to send a real email.
+3. Restart with `npm run dev`, issue an invoice, and open its details. Select advance, flexible partial, or full balance; create a hosted test Payment Link and open it. Complete only a Razorpay test-mode payment.
+4. Use **Refresh status** in invoice details. It fetches the stored link and associated payments server-to-server. The UI reports the last successful reconciliation timestamp.
+5. Use **Send invoice PDF and payment link** only after configuring Gmail SMTP; it emails the attached PDF and current link to the client email on the issued invoice. Resending with an existing link does not create another link.
+
+For hosted webhook use, configure `RAZORPAY_WEBHOOK_PUBLIC_URL` and the independent `RAZORPAY_WEBHOOK_SECRET`; register the HTTPS endpoint in the Razorpay dashboard for the same Test or Live mode and subscribe to the needed `payment_link.*`, `payment.*`, and `refund.processed` events. Razorpay sends the original JSON body and `X-Razorpay-Signature`; the app verifies HMAC-SHA256 against the raw body and deduplicates using `x-razorpay-event-id`. The receiver has a 256 KB payload limit and a dedicated rate limit. It is the only API path that accepts a non-loopback Host, and only signature-verified webhook events can write via that route. The rest of the no-login business API remains loopback-only. To deploy the webhook, use a hardened HTTPS reverse proxy that exposes only this endpoint while keeping administrative routes private; do not expose this local app's business API directly or rely on a temporary tunnel as production infrastructure.
+
+The app does not silently switch to live mode. Live mode requires the merchant's live API keys, a production review, a secured deployment, HTTPS webhook configuration and merchant-account enablement for each desired payment method. Razorpay's API accepts `expire_by` as Unix epoch seconds; it is optional here, but if supplied it must be at least 15 minutes in the future. Link creation timeouts are marked uncertain; refresh searches Razorpay by the saved `reference_id` before any retry, so a late-created link is recovered without creating a duplicate. If Razorpay or SMTP returns an error, the invoice screen reports it and the event/delivery ledger preserves the failure for diagnosis.
+
+Migration 005 adds gateway link/attempt/refund/event and invoice email delivery tables plus nullable gateway IDs on `invoice_payments`. Existing backups continue to include these tables; old supported backups migrate forward when restored. Take a private database backup before production upgrade and verify that the restored schema reaches migration 005.
 
 ### Backups and email
 

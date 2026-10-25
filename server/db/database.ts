@@ -129,6 +129,7 @@ export function restoreDatabase(backupPath: string) {
       2: ["quotation_status_history", "business_profile"],
       3: ["invoices", "invoice_items", "invoice_payments", "invoice_status_history", "invoice_number_sequences"],
       4: ["order_status_history", "task_status_history", "payment_reversals"],
+      5: ["razorpay_payment_links", "razorpay_payment_attempts", "razorpay_refunds", "razorpay_webhook_events", "invoice_email_deliveries"],
     };
     const requiredForClaimedVersion = Object.entries(versionedTables)
       .filter(([version]) => Number(version) <= claimedVersion)
@@ -151,6 +152,11 @@ export function restoreDatabase(backupPath: string) {
       order_status_history: ["order_id", "new_status"],
       task_status_history: ["task_id", "new_status"],
       payment_reversals: ["order_payment_id", "invoice_payment_id", "amount_minor", "reason", "reversed_at"],
+      razorpay_payment_links: ["id", "invoice_id", "gateway_link_id", "gateway_reference_id", "collection_mode", "amount_minor", "gateway_amount_paid_minor", "create_request_key", "create_state"],
+      razorpay_payment_attempts: ["gateway_payment_id", "invoice_id", "payment_link_id", "amount_minor", "gateway_status"],
+      razorpay_refunds: ["gateway_refund_id", "invoice_payment_id", "gateway_payment_id", "amount_minor", "status"],
+      razorpay_webhook_events: ["event_id", "event_type", "processing_status", "attempts"],
+      invoice_email_deliveries: ["id", "invoice_id", "recipient", "delivery_status", "attempt_count"],
     };
     const requiredColumnEntries = Object.entries(requiredColumns)
       .filter(([table]) => requiredTables.concat(requiredForClaimedVersion).includes(table));

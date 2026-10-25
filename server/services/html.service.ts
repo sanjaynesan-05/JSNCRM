@@ -1,1 +1,1 @@
-export { generateEmailHtml } from '../../src/services/html.service.ts';
+export { generateEmailHtml, generateEmailText } from '../../src/services/html.service.ts';

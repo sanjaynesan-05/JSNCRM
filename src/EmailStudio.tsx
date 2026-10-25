@@ -132,6 +132,16 @@ const initialDraft: EmailDraft = {
   ],
   closing: "Warmly,",
   signature: "JSN Designs\njsndesigns.com",
+  recipientName: "",
+  companyName: "",
+  documentReference: "",
+  issueDate: "",
+  attachmentName: "",
+  senderName: "",
+  businessName: "JSN DESIGNS",
+  businessDescription: "Creative Design & Branding Solutions",
+  businessContact: "",
+  footerContent: "",
   ctaLabel: "",
   ctaUrl: "",
   template: "professional",
@@ -450,6 +460,16 @@ export default function EmailStudio() {
             </div>
           </Panel>
 
+          <Panel title="Document details" kicker="Optional">
+            <div className="field-grid">
+              <Field label="Recipient name" value={draft.recipientName || ""} onChange={(v) => update("recipientName", v)} />
+              <Field label="Company name" value={draft.companyName || ""} onChange={(v) => update("companyName", v)} />
+              <Field label="Reference number" value={draft.documentReference || ""} onChange={(v) => update("documentReference", v)} />
+              <Field label="Issue date" value={draft.issueDate || ""} onChange={(v) => update("issueDate", v)} />
+              <Field label="Attachment label" value={draft.attachmentName || ""} placeholder="Added automatically when files are attached" onChange={(v) => update("attachmentName", v)} full />
+            </div>
+          </Panel>
+
           {/* Sections */}
           <Panel
             title="Sections"
@@ -498,6 +518,12 @@ export default function EmailStudio() {
                 onChange={(v) => update("signature", v)}
                 rows={2}
               />
+              <div className="field-grid">
+                <Field label="Sender name" value={draft.senderName || ""} onChange={(v) => update("senderName", v)} />
+                <Field label="Business name" value={draft.businessName || ""} onChange={(v) => update("businessName", v)} />
+                <Field label="Business description" value={draft.businessDescription || ""} onChange={(v) => update("businessDescription", v)} />
+                <Field label="Business contact" value={draft.businessContact || ""} placeholder="Optional verified contact details" onChange={(v) => update("businessContact", v)} />
+              </div>
             </div>
             <div className="cta-row">
               <div className="cta-heading">

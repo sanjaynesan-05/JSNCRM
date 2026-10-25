@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
 import { z } from "zod";
-import { generateEmailHtml } from "../services/html.service.ts";
+import { generateEmailHtml, generateEmailText } from "../services/html.service.ts";
 import { gmailUser, isConfigured, sendMail } from "../services/mail.service.ts";
 import type { EmailDraft } from "../../src/types/email.ts";
 
@@ -93,13 +93,23 @@ const handleSend = (test: boolean) => [
         contentType: "image/png",
         cid: "jsn-logo",
       });
+      const renderPayload: EmailDraft = {
+        ...payload,
+        attachmentName:
+          payload.attachmentName?.trim() ||
+          files
+            .filter((file) => !file.cid)
+            .map((file) => file.filename)
+            .join(", "),
+      };
       sending = true;
       await sendMail({
         to: recipients.join(", "),
         cc: cc.join(", ") || undefined,
         bcc: bcc.join(", ") || undefined,
         subject: payload.subject.trim(),
-        html: generateEmailHtml(payload, "cid:jsn-logo"),
+        html: generateEmailHtml(renderPayload, "cid:jsn-logo"),
+        text: generateEmailText(renderPayload),
         attachments: files,
       });
       return response.json({ ok: true });

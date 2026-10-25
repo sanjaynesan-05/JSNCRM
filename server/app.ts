@@ -5,6 +5,7 @@ import rateLimit from "express-rate-limit";
 import emailRoutes from "./routes/email.routes.ts";
 import businessRoutes from "./routes/business.routes.ts";
 import invoiceRoutes from "./routes/invoice.routes.ts";
+import paymentRoutes, { webhookRouter } from "./routes/payment.routes.ts";
 
 export function createApp() {
   const app = express();
@@ -21,20 +22,22 @@ export function createApp() {
     if (["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) {
       const rawHost = req.get("host")?.toLowerCase() || "";
       const host = rawHost.startsWith("[") ? rawHost.slice(1, rawHost.indexOf("]")) : rawHost.split(":")[0];
-      if (host && !["127.0.0.1", "localhost", "::1"].includes(host))
+      const isSignedWebhookPath = req.path === "/api/webhooks/razorpay" && req.method === "POST";
+      if (!isSignedWebhookPath && host && !["127.0.0.1", "localhost", "::1"].includes(host))
         return res
           .status(403)
           .json({
             error: "This local service only accepts loopback Host values.",
           });
       const origin = req.get("origin");
-      if (origin && origin !== clientUrl)
+      if (!isSignedWebhookPath && origin && origin !== clientUrl)
         return res
           .status(403)
           .json({ error: "Request origin is not allowed." });
     }
     next();
   });
+  app.use("/api/webhooks/razorpay", rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), express.raw({ type: "application/json", limit: "256kb" }), webhookRouter);
   app.use(express.json({ limit: "1mb" }));
   app.use(
     rateLimit({
@@ -49,6 +52,7 @@ export function createApp() {
   );
   app.use("/api/email", emailRoutes);
   app.use("/api/invoices", invoiceRoutes);
+  app.use("/api/invoices", paymentRoutes);
   app.use("/api", businessRoutes);
   return app;
 }

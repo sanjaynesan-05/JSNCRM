@@ -122,6 +122,7 @@ export default function App() {
   const [quotationTarget, setQuotationTarget] = useState<string | null>(null);
   const [invoiceClient, setInvoiceClient] = useState<string | null>(null);
   const [invoiceTarget, setInvoiceTarget] = useState<string | null>(null);
+  const [invoiceQuotationTarget, setInvoiceQuotationTarget] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [gmail, setGmail] = useState<string | null>(null);
@@ -271,7 +272,7 @@ export default function App() {
           onDefaultClientConsumed={() => setQuotationClient(null)}
           initialQuotationId={quotationTarget}
           onInitialQuotationConsumed={() => setQuotationTarget(null)}
-          onConverted={() => navigate("orders")}
+          onCreateInvoice={(id) => { setInvoiceQuotationTarget(id); navigate("invoices"); }}
           onEmailStudio={() => {
             toast("Attach the downloaded quotation PDF and review your email before sending.");
             navigate("email");
@@ -279,7 +280,7 @@ export default function App() {
         />
       );
     if (page === "invoices")
-      return <InvoicesPage defaultClientId={invoiceClient} onDefaultClientConsumed={()=>setInvoiceClient(null)} initialInvoiceId={invoiceTarget} onInitialInvoiceConsumed={()=>setInvoiceTarget(null)} onEmailStudio={() => { toast("Download the invoice PDF, attach it in Email Studio, and review before sending."); navigate("email"); }} />;
+      return <InvoicesPage defaultClientId={invoiceClient} onDefaultClientConsumed={()=>setInvoiceClient(null)} initialInvoiceId={invoiceTarget} onInitialInvoiceConsumed={()=>setInvoiceTarget(null)} initialQuotationId={invoiceQuotationTarget} onInitialQuotationConsumed={()=>setInvoiceQuotationTarget(null)} onEmailStudio={() => { toast("Download the invoice PDF, attach it in Email Studio, and review before sending."); navigate("email"); }} />;
     if (page === "orders")
       return <ProjectsPage onClients={(id) => { setClientTarget(id || null); navigate("clients"); }} />;
     return (

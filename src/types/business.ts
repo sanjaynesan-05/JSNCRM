@@ -32,6 +32,8 @@ export type Quotation = {
   client_name: string;
   converted_order_id?: string | null;
   converted_order_number?: string | null;
+  converted_invoice_id?: string | null;
+  converted_invoice_number?: string | null;
   title: string;
   description: string | null;
   currency: string;

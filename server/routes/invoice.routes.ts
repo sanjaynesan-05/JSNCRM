@@ -20,7 +20,7 @@ const computedStatus = (invoice: any, paid: number) => {
 };
 function detail(db: ReturnType<typeof getDatabase>, id: string) {
   const row = db.prepare(`SELECT i.*,c.name client_name,c.company_name,c.email client_email,c.phone client_phone,c.address client_address,
-    (SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=i.id) paid_minor,
+    MAX(0,(SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=i.id)-(SELECT COALESCE(SUM(rf.amount_minor),0) FROM razorpay_refunds rf WHERE rf.invoice_id=i.id AND rf.status='processed')) paid_minor,
     COALESCE(p.business_name,'') business_name,COALESCE(p.contact_person,'') contact_person,
     COALESCE(p.email,'') business_email,COALESCE(p.phone,'') business_phone,COALESCE(p.address,'') business_address,COALESCE(p.website,'') business_website
     FROM invoices i JOIN clients c ON c.id=i.client_id LEFT JOIN business_profile p ON p.id=1 WHERE i.id=?`).get(id) as any;
@@ -76,7 +76,7 @@ router.get("/", (req, res) => {
   const db = getDatabase();
   const dateField=filters.data.date_field==="due"?"i.due_date":"i.issue_date";
   const rows = db.prepare(`SELECT i.*,c.name client_name,
-    (SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=i.id) paid_minor
+    MAX(0,(SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=i.id)-(SELECT COALESCE(SUM(rf.amount_minor),0) FROM razorpay_refunds rf WHERE rf.invoice_id=i.id AND rf.status='processed')) paid_minor
     FROM invoices i JOIN clients c ON c.id=i.client_id
     WHERE (?='' OR i.invoice_number LIKE ? OR c.name LIKE ? OR COALESCE(c.company_name,'') LIKE ?)
     AND (? IS NULL OR ${dateField}>=?) AND (? IS NULL OR ${dateField}<=?)

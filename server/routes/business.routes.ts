@@ -171,7 +171,7 @@ router.get("/quotations", (req, res) => {
   const query = z.object({ status: z.enum(["draft", "sent", "accepted", "rejected", "expired", "cancelled"]).optional(), from: z.string().date().optional(), to: z.string().date().optional(), search: z.string().trim().max(200).optional() }).safeParse(req.query);
   if (!query.success) return bad(res, "Invalid quotation filters.");
   const { status, from, to, search = "" } = query.data;
-  res.json(getDatabase().prepare(`SELECT q.*,c.name client_name,o.id converted_order_id,o.order_number converted_order_number FROM quotations q JOIN clients c ON c.id=q.client_id LEFT JOIN orders o ON o.quotation_id=q.id WHERE (? IS NULL OR q.status=?) AND (? IS NULL OR q.issue_date>=?) AND (? IS NULL OR q.issue_date<=?) AND (?='' OR q.quotation_number LIKE ? OR c.name LIKE ? OR q.title LIKE ? OR COALESCE(q.description,'') LIKE ?) ORDER BY q.created_at DESC`).all(status ?? null,status ?? null,from ?? null,from ?? null,to ?? null,to ?? null,search,`%${search}%`,`%${search}%`,`%${search}%`,`%${search}%`));
+  res.json(getDatabase().prepare(`SELECT q.*,c.name client_name,o.id converted_order_id,o.order_number converted_order_number,i.id converted_invoice_id,i.invoice_number converted_invoice_number FROM quotations q JOIN clients c ON c.id=q.client_id LEFT JOIN orders o ON o.quotation_id=q.id LEFT JOIN invoices i ON i.source_quotation_id=q.id AND i.status <> 'void' WHERE (? IS NULL OR q.status=?) AND (? IS NULL OR q.issue_date>=?) AND (? IS NULL OR q.issue_date<=?) AND (?='' OR q.quotation_number LIKE ? OR c.name LIKE ? OR q.title LIKE ? OR COALESCE(q.description,'') LIKE ?) ORDER BY q.created_at DESC`).all(status ?? null,status ?? null,from ?? null,from ?? null,to ?? null,to ?? null,search,`%${search}%`,`%${search}%`,`%${search}%`,`%${search}%`));
 });
 router.post("/quotations", (req, res) => {
   const input = parsed(quotationSchema, req.body);
@@ -380,7 +380,7 @@ router.get("/quotations/:id", (req, res) => {
   if (!id.success) return bad(res, "Invalid quotation id.");
   const q = getDatabase()
     .prepare(
-      "SELECT q.*,c.name client_name,o.id converted_order_id,o.order_number converted_order_number FROM quotations q JOIN clients c ON c.id=q.client_id LEFT JOIN orders o ON o.quotation_id=q.id WHERE q.id=?",
+      "SELECT q.*,c.name client_name,o.id converted_order_id,o.order_number converted_order_number,i.id converted_invoice_id,i.invoice_number converted_invoice_number FROM quotations q JOIN clients c ON c.id=q.client_id LEFT JOIN orders o ON o.quotation_id=q.id LEFT JOIN invoices i ON i.source_quotation_id=q.id AND i.status <> 'void' WHERE q.id=?",
     )
     .get(id.data);
   if (!q) return bad(res, "Quotation not found.", 404);
@@ -393,6 +393,36 @@ router.get("/quotations/:id", (req, res) => {
       .all(id.data),
     status_history: getDatabase().prepare("SELECT previous_status,new_status,changed_at,metadata FROM quotation_status_history WHERE quotation_id=? ORDER BY changed_at").all(id.data),
   });
+});
+router.delete("/quotations/:id", (req, res) => {
+  const id = z.string().uuid().safeParse(req.params.id);
+  if (!id.success) return bad(res, "Invalid quotation id.");
+  const db = getDatabase();
+  try {
+    db.transaction(() => {
+      const quotation = db.prepare("SELECT id FROM quotations WHERE id=?").get(id.data);
+      if (!quotation) throw new Error("NOT_FOUND");
+      if (db.prepare("SELECT 1 FROM orders WHERE quotation_id=?").get(id.data) ||
+          db.prepare("SELECT 1 FROM invoices WHERE source_quotation_id=?").get(id.data)) {
+        throw new Error("LINKED_RECORD");
+      }
+      db.prepare("DELETE FROM quotation_status_history WHERE quotation_id=?").run(id.data);
+      db.prepare("DELETE FROM quotation_items WHERE quotation_id=?").run(id.data);
+      db.prepare("DELETE FROM quotations WHERE id=?").run(id.data);
+    })();
+    return res.status(204).send();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    return bad(
+      res,
+      message === "NOT_FOUND"
+        ? "Quotation not found."
+        : message === "LINKED_RECORD"
+          ? "This quotation cannot be deleted because it is linked to an order or invoice."
+          : "Unable to delete quotation.",
+      message === "NOT_FOUND" ? 404 : message === "LINKED_RECORD" ? 409 : 500,
+    );
+  }
 });
 router.get("/quotations/:id/pdf", (req, res) => {
   const id = z.string().uuid().safeParse(req.params.id);

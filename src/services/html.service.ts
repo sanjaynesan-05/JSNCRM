@@ -103,6 +103,14 @@ export function generateEmailHtml(draft: EmailDraft, logoSrc = ''): string {
   const bodyStyle = styleFor(draft, 'body');
   const signatureStyle = styleFor(draft, 'signature');
   const buttonStyle = styleFor(draft, 'button');
+  const businessName = draft.businessName?.trim() || 'JSN DESIGNS';
+  const businessDescription = draft.businessDescription?.trim() || 'Creative Design & Branding Solutions';
+  const signature = draft.signature?.trim() || [draft.senderName?.trim(), businessName, businessDescription, draft.businessContact?.trim()].filter(Boolean).join('\n');
+  const metadata = [
+    draft.documentReference?.trim() ? `Reference: ${draft.documentReference.trim()}` : '',
+    draft.issueDate?.trim() ? `Issued: ${draft.issueDate.trim()}` : '',
+  ].filter(Boolean);
+  const recipient = draft.companyName?.trim() || draft.recipientName?.trim();
 
   // Logo: use provided src (data URL for preview, cid: for email) — never a dark fallback block
   const logo = logoSrc
@@ -119,5 +127,33 @@ export function generateEmailHtml(draft: EmailDraft, logoSrc = ''): string {
   const titleColor = titleStyle.color && titleStyle.color !== 'transparent' ? titleStyle.color : '#000000';
   const titleBg = titleStyle.backgroundColor && titleStyle.backgroundColor !== 'transparent' ? titleStyle.backgroundColor : '#ffffff';
 
-  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>${escapeHtml(draft.subject || 'Email')}</title></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;-webkit-text-size-adjust:100%;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f5f5;padding:32px 16px;"><tr><td align="center"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;background:#ffffff;"><tr><td style="background:${escapeHtml(titleBg)};padding:28px 44px 30px;border-bottom:1px solid #d4af37;">${logo}<h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:${titleStyle.fontSize}px;font-weight:${titleStyle.fontWeight};color:${escapeHtml(titleColor)};line-height:${titleStyle.lineHeight};letter-spacing:${titleStyle.letterSpacing}px;">${text(draft.title || 'A considered note')}</h1></td></tr><tr><td style="padding:34px 44px 12px;">${greeting}${body}</td></tr>${draft.sections.map((s) => renderSection(s, draft)).join('')}${legacyCta}<tr><td style="padding:4px 44px 34px;border-top:1px solid #d4af37;"><p style="margin:24px 0 8px;${css(bodyStyle)}">${text(draft.closing)}</p><p style="margin:0;white-space:pre-line;${css(signatureStyle)}">${text(draft.signature)}</p></td></tr></table></td></tr></table></body></html>`;
+  const recipientBlock = recipient
+    ? `<p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#6b6b6b;">Prepared for</p><p style="margin:0 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.4;font-weight:700;color:#1a1a1a;">${text(recipient)}</p>`
+    : '';
+  const metadataBlock = metadata.length
+    ? `<p style="margin:0 0 22px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#6b6b6b;">${metadata.map(text).join(' &nbsp;·&nbsp; ')}</p>`
+    : '';
+  const attachmentBlock = draft.attachmentName?.trim()
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:2px 0 24px;background:#f5f5f5;border-left:3px solid #d4af37;"><tr><td style="padding:12px 14px;"><p style="margin:0 0 3px;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:#6b6b6b;">Attached document</p><p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1a1a;">${text(draft.attachmentName.trim())}</p></td></tr></table>`
+    : '';
+  const footerContent = draft.footerContent?.trim();
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>${escapeHtml(draft.subject || 'Email')}</title></head><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;-webkit-text-size-adjust:100%;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;background:#f5f5f5;"><tr><td align="center" style="padding:32px 12px;"><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;max-width:600px;background:#ffffff;"><tr><td style="background:${escapeHtml(titleBg)};padding:30px 36px 28px;border-bottom:1px solid #d4af37;">${logo}<h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:${titleStyle.fontSize}px;font-weight:${titleStyle.fontWeight};color:${escapeHtml(titleColor)};line-height:${titleStyle.lineHeight};letter-spacing:${titleStyle.letterSpacing}px;">${text(draft.title || 'A considered note')}</h1></td></tr><tr><td style="padding:30px 36px 6px;">${recipientBlock}${metadataBlock}${greeting}${body}${attachmentBlock}</td></tr>${draft.sections.map((s) => renderSection(s, draft)).join('')}${legacyCta}<tr><td style="padding:4px 36px 30px;border-top:1px solid #d4af37;"><p style="margin:24px 0 8px;${css(bodyStyle)}">${text(draft.closing || 'Best regards,')}</p><p style="margin:0;white-space:pre-line;${css(signatureStyle)}">${text(signature)}</p></td></tr><tr><td style="padding:22px 36px;background:#1a1a1a;border-top:3px solid #d4af37;color:#ffffff;"><p style="margin:0 0 5px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;font-weight:700;letter-spacing:.08em;color:#ffffff;">${text(businessName)}</p><p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;color:#ffffff;">${text(businessDescription)}${draft.businessContact?.trim() ? `<br>${text(draft.businessContact.trim())}` : ''}${footerContent ? `<br>${text(footerContent)}` : ''}</p></td></tr></table></td></tr></table></body></html>`;
+}
+
+export function generateEmailText(draft: EmailDraft): string {
+  const lines = [
+    draft.title?.trim(),
+    draft.recipientName?.trim() || draft.companyName?.trim(),
+    draft.documentReference?.trim() ? `Reference: ${draft.documentReference.trim()}` : '',
+    draft.issueDate?.trim() ? `Issued: ${draft.issueDate.trim()}` : '',
+    '',
+    draft.greeting?.trim() || 'Hello,',
+    draft.body?.replace(/<[^>]+>/g, '').trim(),
+    draft.attachmentName?.trim() ? `Attached document: ${draft.attachmentName.trim()}` : '',
+    ...(draft.sections || []).flatMap((section) => [section.heading?.trim(), section.content?.replace(/<[^>]+>/g, '').trim()]),
+    '',
+    draft.closing?.trim() || 'Best regards,',
+    draft.signature?.trim(),
+  ];
+  return lines.filter((line, index) => Boolean(line) || (index > 0 && lines[index - 1])).join('\n').replace(/\n{3,}/g, '\n\n');
 }
