@@ -56,8 +56,10 @@ Copy `.env.example` to `.env`. Values are read by the backend at startup.
 | `GMAIL_APP_PASSWORD` | Empty                                                                   | Gmail App Password used by Nodemailer. It is never sent to the browser.  |
 | `SMTP_PORT`          | `587`                                                                   | SMTP TCP port. Uses STARTTLS on 587; set `465` for implicit TLS.          |
 | `PORT`               | `5000`                                                                  | Express API port.                                                        |
-| `HOST`               | `127.0.0.1`                                                             | Express bind host. Only loopback addresses are accepted because the app has no sign-in. |
+| `HOST`               | `127.0.0.1`                                                             | Express bind host. Use `0.0.0.0` on a hosted service; production requires HTTP Basic Authentication. |
 | `CLIENT_URL`         | `http://localhost:5173`                                                 | Browser origin permitted by CORS and state-changing request checks.      |
+| `APP_USERNAME`       | Empty                                                                   | Hosted app Basic Authentication username. Required in production.        |
+| `APP_PASSWORD`       | Empty                                                                   | Hosted app Basic Authentication password, at least 16 characters. Required in production. |
 | `DATABASE_PATH`      | `%LOCALAPPDATA%\JSN Designs Business Studio\business.sqlite` on Windows | SQLite database file. Set an absolute path if you want another location. |
 | `BACKUP_DIR`         | `%LOCALAPPDATA%\JSN Designs Business Studio\backups` on Windows         | Folder for generated backup snapshots.                                   |
 | `RAZORPAY_KEY_ID` | Empty | Server-only Razorpay key ID. Use a test-mode key for development. |
@@ -351,9 +353,13 @@ Invoice details offer link creation, copy/open actions, gateway payment-attempt 
 4. Use **Refresh status** in invoice details. It fetches the stored link and associated payments server-to-server. The UI reports the last successful reconciliation timestamp.
 5. Use **Send invoice PDF and payment link** only after configuring Gmail SMTP; it emails the attached PDF and current link to the client email on the issued invoice. Resending with an existing link does not create another link.
 
-For hosted webhook use, configure `RAZORPAY_WEBHOOK_PUBLIC_URL` and the independent `RAZORPAY_WEBHOOK_SECRET`; register the HTTPS endpoint in the Razorpay dashboard for the same Test or Live mode and subscribe to the needed `payment_link.*`, `payment.*`, and `refund.processed` events. Razorpay sends the original JSON body and `X-Razorpay-Signature`; the app verifies HMAC-SHA256 against the raw body and deduplicates using `x-razorpay-event-id`. The receiver has a 256 KB payload limit and a dedicated rate limit. It is the only API path that accepts a non-loopback Host, and only signature-verified webhook events can write via that route. The rest of the no-login business API remains loopback-only. To deploy the webhook, use a hardened HTTPS reverse proxy that exposes only this endpoint while keeping administrative routes private; do not expose this local app's business API directly or rely on a temporary tunnel as production infrastructure.
+For hosted webhook use, configure `RAZORPAY_WEBHOOK_PUBLIC_URL` and the independent `RAZORPAY_WEBHOOK_SECRET`; register the HTTPS endpoint in the Razorpay dashboard for the same Test or Live mode and subscribe to the needed `payment_link.*`, `payment.*`, and `refund.processed` events. Razorpay sends the original JSON body and `X-Razorpay-Signature`; the app verifies HMAC-SHA256 against the raw body and deduplicates using `x-razorpay-event-id`. The receiver has a 256 KB payload limit and a dedicated rate limit. The webhook endpoint is exempt from app Basic Authentication but accepts only signature-verified events. All other pages and API routes require app credentials in production.
 
 The app does not silently switch to live mode. Live mode requires the merchant's live API keys, a production review, a secured deployment, HTTPS webhook configuration and merchant-account enablement for each desired payment method. Razorpay's API accepts `expire_by` as Unix epoch seconds; it is optional here, but if supplied it must be at least 15 minutes in the future. Link creation timeouts are marked uncertain; refresh searches Razorpay by the saved `reference_id` before any retry, so a late-created link is recovered without creating a duplicate. If Razorpay or SMTP returns an error, the invoice screen reports it and the event/delivery ledger preserves the failure for diagnosis.
+
+#### Render deployment
+
+This service serves the production Vite build and API from one origin. Use Build Command `npm ci && npm run build`, Start Command `npm run start`, and health check path `/healthz`. Set `NODE_ENV=production`, `HOST=0.0.0.0`, `CLIENT_URL=https://<your-render-service>.onrender.com`, `APP_USERNAME`, and a unique `APP_PASSWORD` of at least 16 characters. Render supplies `PORT`; do not hard-code it. Set `DATABASE_PATH=/var/data/business.sqlite` and attach a persistent disk mounted at `/var/data` before accepting business records. Configure `RAZORPAY_MODE=test`, test API keys, and a separate webhook secret first. Set `RAZORPAY_WEBHOOK_PUBLIC_URL=https://<your-render-service>.onrender.com/api/webhooks/razorpay`, then register that HTTPS endpoint in Razorpay Test Mode. The webhook endpoint and health checks are public; all other pages and API routes require Basic Authentication. Switch to live credentials only after test payments, reconciliation and webhook delivery work.
 
 Migration 005 adds gateway link/attempt/refund/event and invoice email delivery tables plus nullable gateway IDs on `invoice_payments`. Existing backups continue to include these tables; old supported backups migrate forward when restored. Take a private database backup before production upgrade and verify that the restored schema reaches migration 005.
 
@@ -380,14 +386,14 @@ Restore accepts backups produced with this schema version. Restoring an older ba
 
 ## Security and privacy
 
-- Express accepts only IPv4/IPv6 loopback bind addresses and Vite binds its local development server. The application has no authentication, user accounts, or authorization model; setting `HOST` to a network-facing address stops the API from starting.
-- CORS is limited to `CLIENT_URL`; state-changing requests validate supplied Origin and loopback Host values. Helmet security headers and a 60-request-per-15-minute rate limit are enabled.
+- Local development defaults to an IPv4 loopback bind; hosted deployments may bind to `0.0.0.0` or `::`. Production startup requires `APP_USERNAME` and an `APP_PASSWORD` of at least 16 characters. HTTP Basic Authentication protects the frontend and business API; use HTTPS and keep the credentials private.
+- CORS is limited to `CLIENT_URL`; state-changing requests validate supplied Origin and Host values. Helmet security headers and a 60-request-per-15-minute rate limit are enabled. The signed Razorpay webhook is separately verified and remains reachable without app credentials.
 - On 2026-10-09, `npm audit` reported 7 development-tree findings (5 high, 2 moderate); `npm audit --omit=dev` reported 0 production findings. Affected packages are `tailwindcss`, `braces`, `chokidar`, `fast-glob`, `micromatch`, `postcss-nested`, and `postcss-selector-parser`. The current Tailwind 3.4.19 range is affected; npm proposes Tailwind 4.3.3, a major upgrade. This audit was not force-fixed because Tailwind 4 requires build configuration and CSS compatibility work. Re-run both audit commands before release.
 - SQL values are passed as parameters. Business request bodies are validated at runtime. Database files and backups are not served by Vite.
 - Gmail credentials stay in the backend environment. Email attachment bytes are held in memory for the request and are not kept as a permanent upload archive.
 - `.env`, SQLite/database files, backup files, and upload data are excluded by `.gitignore`. Check the ignore rules before storing any custom data path inside the repository.
 
-This app is designed for one trusted local user. Loopback binding is not a substitute for authentication or operating-system account security. Do not change `HOST` to a network-facing address or expose the API to an untrusted network. Do not commit or share database backups casually.
+This app is designed for one trusted user. Hosted deployments must use HTTPS, Basic Authentication, a strong private app password, and persistent private storage. Do not expose the SQLite database or backups. Basic Authentication is a single-user access gate, not a multi-user role or permission system.
 
 ## Build and tests
 
@@ -453,4 +459,4 @@ Choose a complete SQLite backup generated by this application. A renamed file is
 
 ## Future scope
 
-Potential follow-on work includes direct attachment handoff from quotation details to Email Studio and configurable logo asset management. Tax calculation, user authentication, and multi-user deployment are not implemented.
+Potential follow-on work includes direct attachment handoff from quotation details to Email Studio and configurable logo asset management. Tax calculation and multi-user roles are not implemented.
