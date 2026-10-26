@@ -1,7 +1,7 @@
 import type { EmailDraft, EmailSection, EmailTable, EmailTableCell, SectionBlock, TypographyStyle } from '../types/email';
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
-const safeUrl = (value: string) => /^https?:\/\//i.test(value.trim()) ? value.trim() : '#';
+const safeUrl = (value: string) => /^(https?:\/\/|upi:\/\/pay\?)/i.test(value.trim()) ? value.trim() : '#';
 const text = (value: string) => escapeHtml(value).replace(/\n/g, '<br>');
 
 // Strict rich-text sanitizer — strips unknown tags, normalises divs to p, handles links and font colour/size
@@ -84,7 +84,7 @@ const renderBlock = (block: SectionBlock, draft: EmailDraft): string => {
   if (block.type === 'divider') return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:8px 0 22px;border-bottom:1px solid #dfe5df;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>`;
   if (block.type === 'cta' && block.ctaLabel && block.ctaUrl) {
     const btnStyle = styleFor(draft, 'button');
-    return `<p style="margin:4px 0 22px;text-align:${btnStyle.textAlign};"><a href="${escapeHtml(safeUrl(block.ctaUrl))}" style="display:inline-block;padding:13px 22px;border-radius:3px;text-decoration:none;${css(btnStyle)}">${text(block.ctaLabel)}</a></p>`;
+    return `<p style="margin:4px 0 22px;text-align:${btnStyle.textAlign};"><a href="${escapeHtml(safeUrl(block.ctaUrl))}" target="_top" style="display:inline-block;padding:13px 22px;border-radius:3px;text-decoration:none;${css(btnStyle)}">${text(block.ctaLabel)}</a></p>`;
   }
   if (block.type === 'table' && block.table) return `<div style="margin:0 0 22px;">${renderTable(block.table, styleFor(draft, 'table'))}</div>`;
   return '';
@@ -112,7 +112,7 @@ export function generateEmailHtml(draft: EmailDraft, logoSrc = ''): string {
   const greeting = `<p style="margin:0 0 18px;${css(bodyStyle)}">${text(draft.greeting || 'Hello,')}</p>`;
   const body = draft.body ? `<div style="margin:0 0 18px;${css(bodyStyle)}">${richText(draft.body)}</div>` : '';
   const legacyCta = draft.ctaLabel && draft.ctaUrl
-    ? `<tr><td style="padding:2px 44px 28px;"><a href="${escapeHtml(safeUrl(draft.ctaUrl))}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;padding:13px 22px;border-radius:3px;${css(buttonStyle)}">${text(draft.ctaLabel)}</a></td></tr>`
+    ? `<tr><td style="padding:2px 44px 28px;"><a href="${escapeHtml(safeUrl(draft.ctaUrl))}" target="_top" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;padding:13px 22px;border-radius:3px;${css(buttonStyle)}">${text(draft.ctaLabel)}</a></td></tr>`
     : '';
 
   // Title color must use the draft's configured color (not hardcoded dark)

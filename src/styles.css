@@ -330,6 +330,12 @@ a { color: var(--green); }
 /* ─── CTA row ────────────────────────────────────────────── */
 .cta-row { border-top: 1px solid #e8ece8; margin-top: 20px; padding-top: 18px; }
 .cta-heading { display: flex; align-items: center; gap: 7px; color: #53655d; font-size: 11px; font-weight: 700; margin-bottom: 14px; }
+.payment-link-heading { margin-top: 18px; }
+.payment-link-controls { display: flex; align-items: flex-end; gap: 12px; }
+.payment-link-amount { display: grid; gap: 6px; width: min(260px, 100%); }
+.payment-link-amount input { min-height: 38px; padding: 9px 10px; border: 1px solid #dce3de; border-radius: 4px; color: #1a1a1a; }
+.payment-link-preview,.payment-link-note { margin: 9px 0 0; color: #6b6b6b; font-size: 11px; overflow-wrap: anywhere; }
+.payment-link-preview a { color: #1a1a1a; }
 
 /* ─── Attachments ────────────────────────────────────────── */
 .upload-zone {
@@ -711,6 +717,8 @@ a { color: var(--green); }
   .preview-header h2 { font-size: 18px; }
   .field-grid { grid-template-columns: 1fr; }
   .field-grid .full { grid-column: auto; }
+  .payment-link-controls { align-items: stretch; flex-direction: column; }
+  .payment-link-amount { width: 100%; }
   .panel { padding: 16px; }
   .actionbar { height: auto; min-height: 64px; padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
   .footer-note { display: none; }

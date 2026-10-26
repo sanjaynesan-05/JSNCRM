@@ -190,6 +190,9 @@ export default function EmailStudio() {
   const [mode, setMode] = useState<"preview" | "html">("preview");
   const [account, setAccount] = useState("Not connected");
   const [busy, setBusy] = useState<"test" | "send" | null>(null);
+  const [upiAmount, setUpiAmount] = useState("");
+  const [upiGenerating, setUpiGenerating] = useState(false);
+  const [upiLink, setUpiLink] = useState("");
   const [sent, setSent] = useState<{
     recipient: string;
     subject: string;
@@ -210,6 +213,30 @@ export default function EmailStudio() {
 
   const update = (key: keyof EmailDraft, value: string | TemplateId) =>
     setDraft((c) => ({ ...c, [key]: value }));
+  const generateUpiLink = async () => {
+    setUpiGenerating(true);
+    setUpiLink("");
+    try {
+      const response = await fetch("/api/email/payment-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: upiAmount }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to generate payment link.");
+      setUpiLink(result.paymentLink);
+      setDraft((current) => ({ ...current, ctaLabel: current.ctaLabel || "Pay using UPI", ctaUrl: result.paymentLink }));
+      if (result.mode === "test") {
+        toast.success("Test payment link added. Configure live Razorpay keys before sending to customers.");
+      } else {
+        toast.success("Clickable payment link added to the email button.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to generate payment link.");
+    } finally {
+      setUpiGenerating(false);
+    }
+  };
   const updateSection = (id: string, patch: Partial<EmailSection>) =>
     setDraft((c) => ({
       ...c,
@@ -514,9 +541,21 @@ export default function EmailStudio() {
                   label="Destination URL"
                   value={draft.ctaUrl}
                   placeholder="https://"
-                  onChange={(v) => update("ctaUrl", v)}
+                  onChange={(v) => { update("ctaUrl", v); setUpiLink(""); }}
                 />
               </div>
+              <div className="cta-heading payment-link-heading">UPI payment link</div>
+              <div className="payment-link-controls">
+                <label className="payment-link-amount">
+                  <span className="field-label">Amount (INR)</span>
+                  <input type="number" min="0.01" max="100000" step="0.01" value={upiAmount} onChange={(event) => { if (upiLink) setDraft((current) => current.ctaUrl === upiLink ? { ...current, ctaUrl: "" } : current); setUpiAmount(event.target.value); setUpiLink(""); }} placeholder="5000.00" />
+                </label>
+                <button type="button" className="small-button" onClick={() => void generateUpiLink()} disabled={upiGenerating || !upiAmount}>
+                  {upiGenerating ? "Generating…" : "Generate and add link"}
+                </button>
+              </div>
+              {upiLink && <p className="payment-link-preview">Added to the CTA button: <a href={upiLink}>{upiLink}</a></p>}
+              <p className="payment-link-note">Creates a clickable hosted UPI link for this amount. Live Razorpay keys are needed to collect real payments.</p>
             </div>
           </Panel>
 
@@ -785,7 +824,7 @@ function PreviewFrame({ html }: { html: string }) {
         display: "block",
         background: "#ffffff",
       }}
-      sandbox="allow-same-origin"
+      sandbox="allow-same-origin allow-top-navigation-by-user-activation"
     />
   );
 }
