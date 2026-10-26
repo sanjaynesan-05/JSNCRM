@@ -37,7 +37,7 @@ test("Razorpay links, server verified payments, webhook signatures and deduplica
   await assert.rejects(() => createPaymentLink(db,invoiceId,{mode:"advance",amount_minor:200001}), (error:any) => error instanceof RazorpayError && error.status===400);
   await reconcileLink(db,(link as any).id);
   await reconcileLink(db,(link as any).id);
-  assert.equal(invoicePaymentSummary(db,invoiceId)?.paid_minor,150000);
+  assert.equal((await invoicePaymentSummary(db,invoiceId))?.paid_minor,150000);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM invoice_payments WHERE gateway_payment_id='pay_test_1'").get() && (db.prepare("SELECT COUNT(*) count FROM invoice_payments WHERE gateway_payment_id='pay_test_1'").get() as any).count,1);
 
   simulateUncertainCreate=true;

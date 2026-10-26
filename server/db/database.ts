@@ -11,13 +11,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PostgresDatabase } from "./postgres.ts";
 
-export type Db = InstanceType<typeof Database>;
+export type Db = any;
 const migrationsDir = fileURLToPath(new URL("./migrations/", import.meta.url));
 const readMigrations = () => readdirSync(migrationsDir)
   .filter((name) => /^\d+_.*\.sql$/.test(name))
   .sort((a, b) => Number(a.slice(0, 3)) - Number(b.slice(0, 3)));
-let current: Db | undefined;
+let current: any | undefined;
 let currentPath: string | undefined;
 export function openDatabase(
   file = process.env.DATABASE_PATH ||
@@ -80,6 +81,7 @@ export function openDatabase(
 }
 export function initializeDatabase() {
   if (!current) {
+    if (process.env.DATABASE_URL) throw new Error("PostgreSQL is configured; initialize it with initializePostgresDatabase().");
     currentPath =
       process.env.DATABASE_PATH ||
       join(
@@ -91,8 +93,47 @@ export function initializeDatabase() {
   }
   return current;
 }
+export async function initializePostgresDatabase() {
+  if (current) return current;
+  const database = new PostgresDatabase();
+  try {
+    await database.migrate();
+    current = database;
+    return current;
+  } catch (error) {
+    await database.close();
+    throw error;
+  }
+}
 export function getDatabase(): Db {
-  return current ?? initializeDatabase();
+  if (current) return current;
+  if (process.env.DATABASE_URL) throw new Error("PostgreSQL has not finished initializing.");
+  return initializeDatabase();
+}
+export async function closeDatabase() {
+  if (!current) return;
+  if (current instanceof PostgresDatabase) await current.close();
+  else current.close();
+  current = undefined;
+}
+let sqliteTransactionQueue: Promise<void> = Promise.resolve();
+export function transaction<T extends (...args: any[]) => any>(database: Db, callback: T) {
+  if (database instanceof PostgresDatabase) return database.transaction(callback);
+  return (...args: Parameters<T>) => {
+    const pending = sqliteTransactionQueue.then(async () => {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = await callback(...args);
+        database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    });
+    sqliteTransactionQueue = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
 }
 export function restoreDatabase(backupPath: string) {
   if (!currentPath || currentPath === ":memory:")
@@ -130,6 +171,7 @@ export function restoreDatabase(backupPath: string) {
       3: ["invoices", "invoice_items", "invoice_payments", "invoice_status_history", "invoice_number_sequences"],
       4: ["order_status_history", "task_status_history", "payment_reversals"],
       5: ["razorpay_payment_links", "razorpay_payment_attempts", "razorpay_refunds", "razorpay_webhook_events", "invoice_email_deliveries"],
+      6: ["invoice_number_sequences"],
     };
     const requiredForClaimedVersion = Object.entries(versionedTables)
       .filter(([version]) => Number(version) <= claimedVersion)

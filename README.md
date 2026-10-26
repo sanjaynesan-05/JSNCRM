@@ -61,6 +61,7 @@ Copy `.env.example` to `.env`. Values are read by the backend at startup.
 | `APP_USERNAME`       | Empty                                                                   | Hosted app Basic Authentication username. Required in production.        |
 | `APP_PASSWORD`       | Empty                                                                   | Hosted app Basic Authentication password, at least 16 characters. Required in production. |
 | `DATABASE_PATH`      | `%LOCALAPPDATA%\JSN Designs Business Studio\business.sqlite` on Windows | SQLite database file. Set an absolute path if you want another location. |
+| `DATABASE_URL`       | Empty                                                                   | Optional Neon PostgreSQL connection string. When set, PostgreSQL is used instead of SQLite. Keep the URL server-side. |
 | `BACKUP_DIR`         | `%LOCALAPPDATA%\JSN Designs Business Studio\backups` on Windows         | Folder for generated backup snapshots.                                   |
 | `RAZORPAY_KEY_ID` | Empty | Server-only Razorpay key ID. Use a test-mode key for development. |
 | `RAZORPAY_KEY_SECRET` | Empty | Server-only Razorpay API secret. Never add it to Vite/client variables. |
@@ -81,7 +82,7 @@ The sidebar provides Dashboard, Email Studio, Quotations, Invoices, Orders & Pro
 
 Dashboard values come from SQLite queries. It shows active client count, draft/sent quotation count, active order count, open task count, outstanding order balances, and up to five upcoming open tasks. A new database displays zero counts and an honest empty task state; no sample revenue, orders, or clients are fabricated.
 
-The dashboard also shows open and overdue invoice counts and links to the invoice list. It deliberately does not add invoice money to the existing order-balance figure.
+The dashboard also shows open and overdue invoice counts and links to the invoice list. It deliberately does not add invoice money to the existing order-balance figure. Queries use the configured SQLite or PostgreSQL database.
 
 ### Email Studio
 
@@ -127,7 +128,7 @@ The Orders & Projects screen creates direct orders, updates order status and del
 
 ### Settings
 
-Settings reports whether Gmail is configured without disclosing its password. It provides a database backup download and a restore upload. The database path can be changed with `DATABASE_PATH` in `.env`.
+Settings reports whether Gmail is configured without disclosing its password. It provides a database backup download and a restore upload. SQLite mode downloads a SQLite file; PostgreSQL mode downloads a JSON snapshot. The database path can be changed with `DATABASE_PATH` in `.env`.
 
 ## Architecture
 
@@ -152,7 +153,9 @@ src/
 server/
   index.ts                        Environment loading, database initialization and listener
   app.ts                          Express middleware and route registration
-  db/database.ts                  SQLite setup, migrations and restore operations
+  db/database.ts                  Database selection, SQLite setup and migrations
+  db/postgres.ts                  PostgreSQL pool, transactions and snapshots
+  db/postgres-migrations/         Versioned PostgreSQL schema migrations
   db/migrations/001_initial.sql   Initial versioned schema
   schemas/business.ts             Zod validation schemas
   routes/email.routes.ts          Existing email API with runtime payload validation
@@ -167,11 +170,13 @@ server/
   invoice.test.ts                  Invoice API lifecycle/accounting regression tests
 ```
 
-Frontend components call typed local API helpers and do not run SQL. The server uses parameterized SQL through `better-sqlite3`. Express middleware includes Helmet, CORS, rate limiting, and Origin/Host checks for state-changing methods. Zod validates untrusted business and email request payloads.
+Frontend components call typed local API helpers and do not run SQL. The server uses parameterized SQL through `better-sqlite3` for local SQLite mode and `pg` for PostgreSQL mode. Set `DATABASE_URL` to use PostgreSQL; server startup applies its numbered migrations before accepting requests. Express middleware includes Helmet, CORS, rate limiting, and Origin/Host checks for state-changing methods. Zod validates untrusted business and email request payloads.
 
 ## Database and business rules
 
-The SQLite file is local and is never placed in `public/`, `src/`, or `dist/`. At startup the server creates the parent directory, enables foreign keys, uses WAL journaling and a five-second busy timeout, applies any pending versioned migrations, then checks SQLite and foreign-key integrity before listening. Migration versions and application timestamps are stored in `schema_migrations`. Migrations are additive/versioned; startup does not reset existing data.
+The SQLite file is local and is never placed in `public/`, `src/`, or `dist/`. In SQLite mode, startup creates the parent directory, enables foreign keys, uses WAL journaling and a five-second busy timeout, applies pending migrations, then checks SQLite and foreign-key integrity before listening. PostgreSQL mode uses a connection pool and applies its matching versioned migrations before listening. Both modes store migration versions in `schema_migrations`; startup does not reset existing data.
+
+To copy a local SQLite database into an empty PostgreSQL database, set `SQLITE_SOURCE` to the SQLite file path and `DATABASE_URL` to the destination connection string, then run `npm run migrate:sqlite-to-postgres`. The importer takes a consistent temporary SQLite backup, preserves row IDs and related records, verifies per-table row counts, and leaves the source untouched. It refuses to import if the destination already contains business data.
 
 Migration **001** creates the core business tables. Migration **002** adds quotation lifecycle history and the single-row business profile. Startup applies pending numbered migrations to fresh and existing databases:
 

@@ -63,7 +63,7 @@ test("business database, APIs, calculations, backups and HTML generation", async
             .prepare("SELECT COUNT(*) count FROM schema_migrations")
             .get() as any
         ).count,
-        5,
+        6,
       );
       const reopened = openDatabase(dbPath);
       reopened.close();
@@ -73,7 +73,7 @@ test("business database, APIs, calculations, backups and HTML generation", async
             .prepare("SELECT COUNT(*) count FROM schema_migrations")
             .get() as any
         ).count,
-        5,
+        6,
       );
       assert.equal(
         db.prepare("SELECT COUNT(*) count FROM clients").get() &&
@@ -94,7 +94,7 @@ test("business database, APIs, calculations, backups and HTML generation", async
       assert.equal((upgradedLegacy.prepare("SELECT name FROM clients WHERE client_code='CL-LEGACY'").get() as any).name, "Legacy client");
       assert.equal((upgradedLegacy.prepare("SELECT total_minor FROM quotations WHERE quotation_number='QT-LEGACY'").get() as any).total_minor, 2500);
       assert.equal((upgradedLegacy.prepare("SELECT description FROM quotation_items WHERE quotation_id='00000000-0000-4000-8000-000000000002'").get() as any).description, "Legacy line item");
-      assert.equal((upgradedLegacy.prepare("SELECT COUNT(*) count FROM schema_migrations").get() as any).count, 5);
+      assert.equal((upgradedLegacy.prepare("SELECT COUNT(*) count FROM schema_migrations").get() as any).count, 6);
       upgradedLegacy.close();
     },
   );

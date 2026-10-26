@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { isIP } from "node:net";
 import { createApp } from "./app.ts";
-import { initializeDatabase } from "./db/database.ts";
+import { initializeDatabase, initializePostgresDatabase } from "./db/database.ts";
 import { razorpayConfiguration } from "./services/razorpay.service.ts";
 
 const port = Number(process.env.PORT || 5000);
@@ -13,7 +13,8 @@ if (!loopback && !networkHost) throw new Error("HOST must be a loopback address 
 if (process.env.NODE_ENV === "production" && (!process.env.APP_USERNAME || (process.env.APP_PASSWORD || "").length < 16)) {
   throw new Error("Production requires APP_USERNAME and an APP_PASSWORD of at least 16 characters.");
 }
-initializeDatabase();
+if (process.env.DATABASE_URL) await initializePostgresDatabase();
+else initializeDatabase();
 const paymentConfig = razorpayConfiguration();
 if (!paymentConfig.configured) console.warn(`Razorpay payments are disabled: ${paymentConfig.problem}`);
 if (!process.env.RAZORPAY_WEBHOOK_SECRET) console.warn("Razorpay webhook processing is disabled until RAZORPAY_WEBHOOK_SECRET is configured.");
