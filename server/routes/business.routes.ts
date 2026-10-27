@@ -82,7 +82,7 @@ router.get("/clients", async (req, res) => {
   const archived = status === "archived" ? "IS NOT NULL" : "IS NULL";
   const statusClause = status === "all" ? "1=1" : `archived_at ${archived}`;
   const term = `%${search}%`;
-  res.json(await getDatabase().prepare(`SELECT * FROM clients WHERE ${statusClause} AND (?='' OR name LIKE ? OR COALESCE(company_name,'') LIKE ? OR COALESCE(email,'') LIKE ? OR client_code LIKE ?) ORDER BY created_at DESC`).all(search, term, term, term, term));
+  res.json(await getDatabase().prepare(`SELECT * FROM clients WHERE ${statusClause} AND (CAST(? AS TEXT)='' OR name LIKE ? OR COALESCE(company_name,'') LIKE ? OR COALESCE(email,'') LIKE ? OR client_code LIKE ?) ORDER BY created_at DESC`).all(search, term, term, term, term));
 });
 router.get("/clients/:id", async (req, res) => {
   const id = z.string().uuid().safeParse(req.params.id);
@@ -173,7 +173,7 @@ router.get("/quotations", async (req, res) => {
   const query = z.object({ status: z.enum(["draft", "sent", "accepted", "rejected", "expired", "cancelled"]).optional(), from: z.string().date().optional(), to: z.string().date().optional(), search: z.string().trim().max(200).optional() }).safeParse(req.query);
   if (!query.success) return bad(res, "Invalid quotation filters.");
   const { status, from, to, search = "" } = query.data;
-  res.json(await getDatabase().prepare(`SELECT q.*,c.name client_name,o.id converted_order_id,o.order_number converted_order_number,i.id converted_invoice_id,i.invoice_number converted_invoice_number FROM quotations q JOIN clients c ON c.id=q.client_id LEFT JOIN orders o ON o.quotation_id=q.id LEFT JOIN invoices i ON i.source_quotation_id=q.id AND i.status <> 'void' WHERE (? IS NULL OR q.status=?) AND (? IS NULL OR q.issue_date>=?) AND (? IS NULL OR q.issue_date<=?) AND (?='' OR q.quotation_number LIKE ? OR c.name LIKE ? OR q.title LIKE ? OR COALESCE(q.description,'') LIKE ?) ORDER BY q.created_at DESC`).all(status ?? null,status ?? null,from ?? null,from ?? null,to ?? null,to ?? null,search,`%${search}%`,`%${search}%`,`%${search}%`,`%${search}%`));
+  res.json(await getDatabase().prepare(`SELECT q.*,c.name client_name,o.id converted_order_id,o.order_number converted_order_number,i.id converted_invoice_id,i.invoice_number converted_invoice_number FROM quotations q JOIN clients c ON c.id=q.client_id LEFT JOIN orders o ON o.quotation_id=q.id LEFT JOIN invoices i ON i.source_quotation_id=q.id AND i.status <> 'void' WHERE (CAST(? AS TEXT) IS NULL OR q.status=?) AND (CAST(? AS TEXT) IS NULL OR q.issue_date>=?) AND (CAST(? AS TEXT) IS NULL OR q.issue_date<=?) AND (CAST(? AS TEXT)='' OR q.quotation_number LIKE ? OR c.name LIKE ? OR q.title LIKE ? OR COALESCE(q.description,'') LIKE ?) ORDER BY q.created_at DESC`).all(status ?? null,status ?? null,from ?? null,from ?? null,to ?? null,to ?? null,search,`%${search}%`,`%${search}%`,`%${search}%`,`%${search}%`));
 });
 router.post("/quotations", async (req, res) => {
   const input = parsed(quotationSchema, req.body);

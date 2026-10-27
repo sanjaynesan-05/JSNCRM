@@ -41,8 +41,10 @@ export class PostgresDatabase {
 
   constructor(connectionString = process.env.DATABASE_URL) {
     if (!connectionString) throw new Error("DATABASE_URL is required for PostgreSQL.");
+    const normalizedUrl = new URL(connectionString);
+    if (normalizedUrl.searchParams.get("sslmode") === "require") normalizedUrl.searchParams.set("sslmode", "verify-full");
     this.pool = new pg.Pool({
-      connectionString,
+      connectionString: normalizedUrl.toString(),
       max: 4,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,

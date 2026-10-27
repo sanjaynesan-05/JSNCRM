@@ -78,8 +78,8 @@ router.get("/", async (req, res) => {
   const rows = await db.prepare(`SELECT i.*,c.name client_name,
     MAX(0,(SELECT COALESCE(SUM(ip.amount_minor-COALESCE(r.amount_minor,0)),0) FROM invoice_payments ip LEFT JOIN payment_reversals r ON r.invoice_payment_id=ip.id WHERE ip.invoice_id=i.id)-(SELECT COALESCE(SUM(rf.amount_minor),0) FROM razorpay_refunds rf WHERE rf.invoice_id=i.id AND rf.status='processed')) paid_minor
     FROM invoices i JOIN clients c ON c.id=i.client_id
-    WHERE (?='' OR i.invoice_number LIKE ? OR c.name LIKE ? OR COALESCE(c.company_name,'') LIKE ?)
-    AND (? IS NULL OR ${dateField}>=?) AND (? IS NULL OR ${dateField}<=?)
+    WHERE (CAST(? AS TEXT)='' OR i.invoice_number LIKE ? OR c.name LIKE ? OR COALESCE(c.company_name,'') LIKE ?)
+    AND (CAST(? AS TEXT) IS NULL OR ${dateField}>=?) AND (CAST(? AS TEXT) IS NULL OR ${dateField}<=?)
     ORDER BY i.created_at DESC`).all(filters.data.search || "", `%${filters.data.search || ""}%`, `%${filters.data.search || ""}%`, `%${filters.data.search || ""}%`, filters.data.from || null, filters.data.from || null, filters.data.to || null, filters.data.to || null) as any[];
   const result = rows.map((row) => ({ ...row, balance_minor: Math.max(0, row.total_minor - row.paid_minor), status: computedStatus(row, row.paid_minor) })).filter((row) => !filters.data.status || row.status === filters.data.status);
   res.json(result);
