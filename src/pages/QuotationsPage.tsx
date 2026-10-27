@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Copy, Download, Eye, FilePlus2, Minus, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, jsonRequest } from "../services/api/apiClient";
+import { notifyAuthExpired } from "../services/api/authEvents";
 import type {
   Client,
   Quotation,
@@ -252,6 +253,7 @@ export default function QuotationsPage({
     setPdfLoadingId(quote.id);
     try {
       const response = await fetch(`/api/quotations/${quote.id}/pdf`);
+      notifyAuthExpired(response);
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || `PDF download failed (${response.status}).`);

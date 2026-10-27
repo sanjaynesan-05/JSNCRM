@@ -1,0 +1,72 @@
+.signin-page {
+  --signin-ink: #151515;
+  --signin-muted: #77756f;
+  --signin-gold: #d4af37;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(440px, 0.88fr);
+  color: var(--signin-ink);
+  background: #f8f7f4;
+}
+.signin-brand-panel {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: clamp(32px, 5vw, 72px);
+  color: #fff;
+  background: #080808;
+}
+.signin-brand-lockup, .signin-mobile-brand { position: relative; z-index: 1; display: flex; align-items: center; gap: 14px; width: max-content; font-size: 12px; font-weight: 700; letter-spacing: 2px; }
+.signin-brand-lockup img, .signin-mobile-brand img { width: 54px; height: 46px; padding: 4px; object-fit: contain; background: #fff; }
+.signin-brand-lockup small, .signin-mobile-brand small { display: block; margin-top: 5px; color: var(--signin-gold); font-size: 9px; letter-spacing: 2.4px; }
+.signin-brand-copy { position: relative; z-index: 1; max-width: 540px; margin-block: 72px; }
+.signin-overline { display: block; color: #9a988f; font-size: 10px; font-weight: 700; letter-spacing: 2.2px; }
+.signin-brand-copy h1 { margin: 22px 0 18px; font-size: clamp(48px, 6.1vw, 84px); font-weight: 500; letter-spacing: -4px; line-height: .98; }
+.signin-brand-copy h1 em { color: var(--signin-gold); font-family: Georgia, "Times New Roman", serif; font-weight: 400; }
+.signin-brand-copy p { max-width: 400px; color: #aaa8a2; font-size: 15px; line-height: 1.8; }
+.signin-brand-footer, .signin-page-footer { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 16px; color: #898780; font-size: 9px; font-weight: 650; letter-spacing: 1.8px; }
+.signin-gold-orbit { position: absolute; right: -220px; bottom: 11%; width: min(48vw, 620px); aspect-ratio: 1; border: 1px solid #d4af3724; border-radius: 50%; }
+.signin-gold-orbit::before, .signin-gold-orbit::after { position: absolute; content: ""; border: 1px solid #d4af3718; border-radius: 50%; }
+.signin-gold-orbit::before { inset: 11%; }
+.signin-gold-orbit::after { inset: 24%; }
+.signin-form-panel { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: clamp(32px, 6vw, 88px); }
+.signin-form-wrap { width: min(100%, 420px); margin: auto; }
+.signin-mobile-brand { display: none; margin-bottom: 54px; }
+.signin-mobile-brand img { border: 1px solid #e8e5dc; }
+.signin-heading { margin-bottom: 36px; }
+.signin-heading .signin-overline { color: #a18528; }
+.signin-heading h2 { margin: 12px 0 8px; font-size: clamp(32px, 4vw, 42px); font-weight: 550; letter-spacing: -1.5px; }
+.signin-heading p { margin: 0; color: var(--signin-muted); font-size: 14px; }
+.signin-form { display: grid; gap: 10px; }
+.signin-form label { margin-top: 12px; color: #46443e; font-size: 12px; font-weight: 650; }
+.signin-form input { width: 100%; height: 50px; padding: 0 14px; border: 1px solid #dcd9d1; border-radius: 3px; outline: none; color: #171717; background: #fff; font-size: 14px; transition: border-color .15s, box-shadow .15s; }
+.signin-form input:focus { border-color: #b99a34; box-shadow: 0 0 0 3px #d4af3726; }
+.signin-password-field { position: relative; }
+.signin-password-field input { padding-right: 48px; }
+.signin-password-toggle { position: absolute; top: 50%; right: 7px; display: grid; width: 36px; height: 36px; place-items: center; transform: translateY(-50%); border: 0; border-radius: 3px; color: #77756f; background: transparent; }
+.signin-password-toggle:hover { color: #111; background: #f5f3ed; }
+.signin-error { margin: 5px 0 0; padding: 11px 12px; border-left: 3px solid #a52b24; color: #84221d; background: #fff2f0; font-size: 12px; line-height: 1.5; }
+.signin-submit { display: flex; align-items: center; justify-content: space-between; height: 50px; margin-top: 14px; padding: 0 16px; border: 1px solid #090909; border-radius: 3px; color: #fff; background: #090909; font-size: 13px; font-weight: 650; transition: background-color .15s, border-color .15s; }
+.signin-submit:hover:not(:disabled) { border-color: #272727; background: #272727; }
+.signin-submit:focus-visible { outline: 3px solid #d4af3766; outline-offset: 2px; }
+.signin-submit:disabled { cursor: not-allowed; opacity: .55; }
+.signin-security-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e2da; color: #77756f; font-size: 11px; line-height: 1.6; }
+.signin-security-note svg { flex: 0 0 auto; margin-top: 1px; color: #9c8129; }
+.signin-help { margin-top: 27px; color: #8a8881; font-size: 11px; }
+.signin-page-footer { width: min(100%, 420px); margin: 28px auto 0; color: #98968e; }
+@media (max-width: 850px) {
+  .signin-page { grid-template-columns: 1fr; }
+  .signin-brand-panel { display: none; }
+  .signin-form-panel { min-height: 100dvh; padding: 32px 24px 20px; }
+  .signin-mobile-brand { display: flex; }
+  .signin-heading { margin-bottom: 26px; }
+  .signin-page-footer { margin-top: 40px; }
+}
+@media (max-width: 420px) {
+  .signin-form-panel { padding-inline: 20px; }
+  .signin-mobile-brand { margin-bottom: 40px; }
+  .signin-heading h2 { font-size: 34px; }
+}

@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { generateEmailHtml } from "./services/html.service";
+import { notifyAuthExpired } from "./services/api/authEvents";
 import type {
   AttachmentItem,
   EmailDraft,
@@ -213,7 +214,7 @@ export default function EmailStudio() {
   }, [draft]);
   useEffect(() => {
     fetch("/api/email/config")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => { notifyAuthExpired(r); return r.ok ? r.json() : null; })
       .then((d) => d?.gmailUser && setAccount(d.gmailUser))
       .catch(() => undefined);
   }, []);
@@ -305,6 +306,7 @@ export default function EmailStudio() {
         method: "POST",
         body: data,
       });
+      notifyAuthExpired(response);
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to send email");
       const timestamp = new Date().toLocaleString([], {
