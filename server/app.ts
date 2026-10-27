@@ -13,6 +13,9 @@ import paymentRoutes, { webhookRouter } from "./routes/payment.routes.ts";
 
 export function createApp() {
   const app = express();
+  // Render's web service sits behind one trusted inbound proxy. Trust only that
+  // hop so req.ip reflects the client without trusting arbitrary proxy chains.
+  if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
   const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
   const appUsername = process.env.APP_USERNAME;
   const appPassword = process.env.APP_PASSWORD;
@@ -46,27 +49,27 @@ export function createApp() {
   });
   app.use("/api/webhooks/razorpay", rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), express.raw({ type: "application/json", limit: "256kb" }), webhookRouter);
   app.use(express.json({ limit: "1mb" }));
-  app.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      limit: 60,
-      standardHeaders: true,
-      legacyHeaders: false,
-    }),
-  );
+  const apiRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.path === "/health" || req.path === "/healthz" || req.path === "/webhooks/razorpay",
+  });
+  const failedAuthenticationRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: "Too many failed authentication attempts. Please wait 15 minutes and try again.",
+  });
   app.get("/api/health", (_request, response) =>
     response.json({ ok: true, service: "jsn-designs-business-studio" }),
   );
   app.get("/healthz", (_request, response) =>
     response.json({ ok: true, service: "jsn-designs-business-studio" }),
   );
-  app.use(rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: (req) => req.path === "/api/health" || req.path === "/healthz" || req.path === "/api/webhooks/razorpay",
-  }));
+  app.use("/api", apiRateLimit);
   app.use((req, res, next) => {
     const isPublicEndpoint = req.path === "/api/health" || req.path === "/healthz" || req.path === "/api/webhooks/razorpay";
     if (isPublicEndpoint || (!appUsername && !appPassword)) return next();
@@ -87,8 +90,10 @@ export function createApp() {
         }
       } catch { /* Malformed credentials are rejected below. */ }
     }
-    res.set("WWW-Authenticate", 'Basic realm="JSNCRM", charset="UTF-8"');
-    return res.status(401).send("Authentication required.");
+    return failedAuthenticationRateLimit(req, res, () => {
+      res.set("WWW-Authenticate", 'Basic realm="JSNCRM", charset="UTF-8"');
+      res.status(401).send("Authentication required.");
+    });
   });
   app.use("/api/email", emailRoutes);
   app.use("/api/invoices", invoiceRoutes);
