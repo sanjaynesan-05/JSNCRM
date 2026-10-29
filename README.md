@@ -372,6 +372,8 @@ This service serves the production Vite build and API from one origin. The Bluep
 
 GitHub Actions runs `npm run build` and `npm test` for pull requests and pushes to `main` (`.github/workflows/ci.yml`). Protect `main` in GitHub settings and require the `checks` job before merging; repository files cannot enable GitHub branch protection themselves.
 
+Jenkins can run the same checks using the root `Jenkinsfile`. Configure a NodeJS installation named `NodeJS-22` in **Manage Jenkins → Tools**, then create a Multibranch Pipeline pointing at this GitHub repository and enable GitHub branch discovery and pull-request discovery. Configure a GitHub webhook to notify Jenkins when pushes and pull requests change; keep the multibranch scan trigger enabled as a fallback. The Jenkins agent needs Git, Node.js 22 provided by the NodeJS plugin, outbound npm registry access, and a POSIX shell for the `sh` steps. The pipeline checks out each branch/PR, runs `npm ci`, `npm run build`, and `npm test`, and removes its workspace after each build. No deployment secrets are needed for these checks.
+
 Build and run the container with:
 
 ```sh
