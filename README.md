@@ -364,7 +364,24 @@ The app does not silently switch to live mode. Live mode requires the merchant's
 
 #### Render deployment
 
-This service serves the production Vite build and API from one origin. Use Build Command `npm ci && npm run build`, Start Command `npm run start`, and health check path `/healthz`. Set `NODE_ENV=production`, `HOST=0.0.0.0`, `CLIENT_URL=https://<your-render-service>.onrender.com`, `APP_USERNAME`, and a unique `APP_PASSWORD` of at least 16 characters. Render supplies `PORT`; do not hard-code it. Set `DATABASE_URL` to the Neon pooled PostgreSQL connection string. Configure `RAZORPAY_MODE=test`, test API keys, and a separate webhook secret first. Set `RAZORPAY_WEBHOOK_PUBLIC_URL=https://<your-render-service>.onrender.com/api/webhooks/razorpay`, then register that HTTPS endpoint in Razorpay Test Mode. The webhook and health endpoints are public; business APIs require a signed session created by the app sign-in screen. Switch to live credentials only after test payments, reconciliation and webhook delivery work.
+The repository includes `render.yaml` as a Render Blueprint. Create or update the Blueprint from that file to define the web service, PostgreSQL database, health check, Node build/start commands, and environment-variable wiring. `APP_USERNAME`, `APP_PASSWORD`, Razorpay credentials, webhook URL, and Gmail credentials are marked for private entry in the Render dashboard; they are not committed to source control. Blueprint synchronization can create paid resources depending on the selected plans, so review the plan and estimated costs in Render before applying it.
+
+This service serves the production Vite build and API from one origin. The Blueprint uses Build Command `npm ci && npm run build`, Start Command `npm run start`, and health check path `/healthz`. Set `NODE_ENV=production`, `HOST=0.0.0.0`, `APP_USERNAME`, and a unique `APP_PASSWORD` of at least 16 characters. Render supplies `PORT`; do not hard-code it. The Blueprint provisions PostgreSQL and wires its connection string as `DATABASE_URL`. Configure `RAZORPAY_MODE=test`, test API keys, and a separate webhook secret first. Set `RAZORPAY_WEBHOOK_PUBLIC_URL=https://<your-render-service>.onrender.com/api/webhooks/razorpay`, then register that HTTPS endpoint in Razorpay Test Mode. The webhook and health endpoints are public; business APIs require a signed session created by the app sign-in screen. Switch to live credentials only after test payments, reconciliation and webhook delivery work.
+
+## CI and Docker
+
+GitHub Actions runs `npm run build` and `npm test` for pull requests and pushes to `main` (`.github/workflows/ci.yml`). Protect `main` in GitHub settings and require the `checks` job before merging; repository files cannot enable GitHub branch protection themselves.
+
+Build and run the container with:
+
+```sh
+docker build -t jsn-business-studio .
+docker run --rm -p 5000:5000 -v jsn-business-data:/app/data \
+  -e APP_USERNAME=your-user -e APP_PASSWORD=your-long-password \
+  jsn-business-studio
+```
+
+For hosted PostgreSQL, provide `DATABASE_URL` as a server-side environment variable and omit the SQLite volume if it is not needed. Never pass production secrets in a committed Compose file or image build arguments.
 
 Migration 005 adds gateway link/attempt/refund/event and invoice email delivery tables plus nullable gateway IDs on `invoice_payments`. Existing backups continue to include these tables; old supported backups migrate forward when restored. Take a private database backup before production upgrade and verify that the restored schema reaches migration 005.
 
