@@ -1,5 +1,4 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import Razorpay from "razorpay";
 import { transaction, type Db } from "../db/database.ts";
 
 const apiRoot = "https://api.razorpay.com/v1";
@@ -14,33 +13,6 @@ export function razorpayConfiguration() {
   return { configured: true, mode, problem: null };
 }
 export const razorpayConfigured = () => razorpayConfiguration().configured;
-
-export async function createStandardOrder(input: { amount: number; currency: string; receipt?: string }) {
-  const configuration = razorpayConfiguration();
-  if (!configuration.configured) throw new RazorpayError(configuration.problem || "Razorpay configuration is unavailable.", 503);
-  const { keyId, keySecret } = env();
-  try {
-    const razorpay = new Razorpay({ key_id: keyId!, key_secret: keySecret! });
-    const order = await razorpay.orders.create({
-      amount: input.amount,
-      currency: input.currency,
-      receipt: input.receipt,
-    });
-    return { order_id: order.id, amount: order.amount, currency: order.currency };
-  } catch (error) {
-    const status = (error as { statusCode?: number }).statusCode;
-    if (status === 401) throw new RazorpayError("Razorpay authentication failed.", 401);
-    throw new RazorpayError(error instanceof Error ? error.message : "Unable to create Razorpay order.", status && status >= 400 && status < 500 ? status : 502);
-  }
-}
-
-export function verifyStandardPaymentSignature(orderId: string, paymentId: string, signature: string) {
-  const secret = env().keySecret;
-  if (!secret) return false;
-  const expected = createHmac("sha256", secret).update(`${orderId}|${paymentId}`).digest();
-  const received = Buffer.from(signature, "hex");
-  return received.length === expected.length && timingSafeEqual(received, expected);
-}
 
 export class RazorpayError extends Error {
   constructor(message: string, public readonly status = 502, public readonly uncertain = false) { super(message); }
@@ -93,7 +65,13 @@ export async function createPaymentLink(db: Db, invoiceId: string, input: { mode
   const openLinks = await db.prepare("SELECT * FROM razorpay_payment_links WHERE invoice_id=? AND create_state='created' AND gateway_status IN ('created','partially_paid') ORDER BY created_at DESC").all(invoiceId) as any[];
   const unsafeLink = openLinks.find((link) => link.amount_minor-link.gateway_amount_paid_minor > outstanding);
   if (unsafeLink) throw new RazorpayError("An existing Razorpay link can collect more than the current invoice balance. Cancel it in Razorpay, then refresh status before creating another link.", 409);
-  const active = openLinks.find((link) => link.collection_mode===input.mode && (!link.expiry_at || Date.parse(link.expiry_at)>Date.now()) && (input.mode==="advance" || input.mode==="flexible" ? link.amount_minor-link.gateway_amount_paid_minor<=outstanding : link.amount_minor-link.gateway_amount_paid_minor===outstanding));
+  const active = openLinks.find((link) => {
+    if (link.collection_mode !== input.mode || (link.expiry_at && Date.parse(link.expiry_at) <= Date.now())) return false;
+    const remaining = link.amount_minor - link.gateway_amount_paid_minor;
+    if (input.mode === "advance") return remaining === amount;
+    if (input.mode === "flexible") return remaining <= outstanding && link.minimum_partial_minor === input.minimum_partial_minor;
+    return remaining === outstanding;
+  });
   if (active) return { ...active, reused: true };
   const openCapacity = openLinks.reduce((total, link) => total + link.amount_minor - link.gateway_amount_paid_minor, 0);
   if (openCapacity + amount > outstanding) throw new RazorpayError("Existing active payment links already cover this invoice balance. Reconcile or cancel a link before creating another.", 409);

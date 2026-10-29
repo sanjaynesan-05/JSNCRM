@@ -20,13 +20,16 @@ test("Razorpay links, server verified payments, webhook signatures and deduplica
 
   assert.equal(razorpayConfiguration().configured, true);
   let simulateUncertainCreate = false, createCalls = 0;
+  const createdLinkAmounts = new Map<string, number>();
   const recoveryInvoice="10000000-0000-4000-8000-000000000003";
   db.prepare("INSERT INTO invoices(id,invoice_number,client_id,title,subtotal_minor,total_minor,issue_date,status,created_at,updated_at,issued_at) VALUES(?,?,?,?,?,?,?,'issued',?,?,?)").run(recoveryInvoice,"INV-2026-0002",clientId,"Recovery work",50000,50000,"2026-10-20",stamp,stamp,stamp);
   globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     const url=String(input);
-    if (init?.method === "POST") { createCalls++; if (simulateUncertainCreate) throw Object.assign(new Error("aborted"),{name:"AbortError"}); return new Response(JSON.stringify({ id:"plink_test_1",short_url:"https://rzp.io/i/test",status:"created",amount:200000,currency:"INR",expire_by:0 }), {status:200}); }
+    if (init?.method === "POST") { createCalls++; if (simulateUncertainCreate) throw Object.assign(new Error("aborted"),{name:"AbortError"}); const id=`plink_test_${createCalls}`, payload=JSON.parse(String(init.body)); createdLinkAmounts.set(id,payload.amount); return new Response(JSON.stringify({ id,short_url:`https://rzp.io/i/${id}`,status:"created",amount:payload.amount,currency:payload.currency,expire_by:0 }), {status:200}); }
     if (url.includes("/payment_links?reference_id=")) { const reference=new URL(url).searchParams.get("reference_id"); return new Response(JSON.stringify({payment_links:[{id:"plink_recovered",reference_id:reference,short_url:"https://rzp.io/i/recovered",status:"created",amount:50000,amount_paid:0,currency:"INR",payments:[]}]}),{status:200}); }
-    if (url.endsWith("/payment_links/plink_test_1")) return new Response(JSON.stringify({ id:"plink_test_1",amount:200000,amount_paid:150000,currency:"INR",status:"partially_paid",payments:[{payment_id:"pay_test_1"}] }),{status:200});
+    const createdLink = url.match(/\/payment_links\/(plink_test_\d+)$/)?.[1];
+    if (createdLink === "plink_test_1") return new Response(JSON.stringify({ id:createdLink,amount:createdLinkAmounts.get(createdLink),amount_paid:150000,currency:"INR",status:"partially_paid",payments:[{payment_id:"pay_test_1"}] }),{status:200});
+    if (createdLink) return new Response(JSON.stringify({id:createdLink,amount:createdLinkAmounts.get(createdLink),amount_paid:0,currency:"INR",status:"created",payments:[]}),{status:200});
     if (url.endsWith("/payment_links/plink_recovered")) return new Response(JSON.stringify({id:"plink_recovered",short_url:"https://rzp.io/i/recovered",amount:50000,amount_paid:0,currency:"INR",status:"created",payments:[]}),{status:200});
     if (url.endsWith("/payments/pay_test_1")) return new Response(JSON.stringify({ id:"pay_test_1",payment_link_id:"plink_test_1",amount:150000,currency:"INR",status:"captured",method:"upi",created_at:1792454400 }),{status:200});
     return new Response(JSON.stringify({ error:{description:"unknown mock request"} }),{status:404});
@@ -34,12 +37,22 @@ test("Razorpay links, server verified payments, webhook signatures and deduplica
 
   const link = await createPaymentLink(db,invoiceId,{mode:"flexible",minimum_partial_minor:100});
   assert.equal((link as any).amount_minor,200000);
+  assert.equal((await createPaymentLink(db,invoiceId,{mode:"flexible",minimum_partial_minor:100}) as any).reused,true);
+  await assert.rejects(() => createPaymentLink(db,invoiceId,{mode:"flexible",minimum_partial_minor:200}), (error:any) => error instanceof RazorpayError && error.status===409);
   await assert.rejects(() => createPaymentLink(db,invoiceId,{mode:"advance",amount_minor:200001}), (error:any) => error instanceof RazorpayError && error.status===400);
   await reconcileLink(db,(link as any).id);
   await reconcileLink(db,(link as any).id);
   assert.equal((await invoicePaymentSummary(db,invoiceId))?.paid_minor,150000);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM invoice_payments WHERE gateway_payment_id='pay_test_1'").get() && (db.prepare("SELECT COUNT(*) count FROM invoice_payments WHERE gateway_payment_id='pay_test_1'").get() as any).count,1);
 
+  const advanceInvoice="10000000-0000-4000-8000-000000000004";
+  db.prepare("INSERT INTO invoices(id,invoice_number,client_id,title,subtotal_minor,total_minor,issue_date,status,created_at,updated_at,issued_at) VALUES(?,?,?,?,?,?,?,'issued',?,?,?)").run(advanceInvoice,"INV-2026-0003",clientId,"Advance work",200000,200000,"2026-10-20",stamp,stamp,stamp);
+  const advance = await createPaymentLink(db,advanceInvoice,{mode:"advance",amount_minor:50000});
+  const differentAdvance = await createPaymentLink(db,advanceInvoice,{mode:"advance",amount_minor:100000});
+  assert.equal((differentAdvance as any).amount_minor,100000,"an advance link with a different amount must not be reused");
+  assert.notEqual((differentAdvance as any).id,(advance as any).id);
+
+  const beforeUncertainCreate = createCalls;
   simulateUncertainCreate=true;
   await assert.rejects(() => createPaymentLink(db,recoveryInvoice,{mode:"balance"}), (error:any) => error instanceof RazorpayError && error.uncertain);
   const uncertain = db.prepare("SELECT id,create_state FROM razorpay_payment_links WHERE invoice_id=?").get(recoveryInvoice) as any;
@@ -47,7 +60,7 @@ test("Razorpay links, server verified payments, webhook signatures and deduplica
   simulateUncertainCreate=false;
   await reconcileLink(db,uncertain.id);
   assert.equal((db.prepare("SELECT gateway_link_id,create_state FROM razorpay_payment_links WHERE id=?").get(uncertain.id) as any).gateway_link_id,"plink_recovered");
-  assert.equal(createCalls,2,"recovery must not submit a second link creation request");
+  assert.equal(createCalls,beforeUncertainCreate+1,"recovery must not submit a second link creation request");
 
   const payload=Buffer.from(JSON.stringify({event:"unknown.event",payload:{}}));
   const signature=createHmac("sha256","webhook-secret").update(payload).digest("hex");
