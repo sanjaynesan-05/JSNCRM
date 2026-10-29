@@ -9,9 +9,10 @@ import { createInvoicePdf } from "../services/invoice-pdf.ts";
 import { generateEmailHtml } from "../services/html.service.ts";
 import { sendMail } from "../services/mail.service.ts";
 import type { EmailDraft, TypographyStyle, TypographyTarget } from "../../src/types/email.ts";
-import { cancelPaymentLink, createPaymentLink, invoicePaymentSummary, processWebhook, razorpayConfigured, reconcileLink, RazorpayError } from "../services/razorpay.service.ts";
+import { cancelPaymentLink, createPaymentLink, createStandardOrder, invoicePaymentSummary, processWebhook, razorpayConfigured, reconcileLink, RazorpayError, verifyStandardPaymentSignature } from "../services/razorpay.service.ts";
 
 const router = createAsyncRouter();
+const standardRouter = createAsyncRouter();
 const webhookRouter = createAsyncRouter();
 const uuid = z.string().uuid();
 const invalid = (res: any, message: string, status = 400) => res.status(status).json({ error: message });
@@ -21,6 +22,32 @@ const logoBuffer = readFileSync(fileURLToPath(new URL("../../src/assets/JSN DESI
 const emailTypography = Object.fromEntries(([
   ["title", 28], ["heading", 18], ["body", 15], ["list", 15], ["table", 15], ["button", 13], ["signature", 14],
 ] as [TypographyTarget, number][]).map(([target, fontSize]) => [target, { fontFamily: "Arial, Helvetica, sans-serif", fontSize, fontWeight: target === "title" || target === "heading" || target === "button" ? 700 : 400, lineHeight: 1.6, letterSpacing: 0, textAlign: target === "button" ? "center" : "left", color: target === "button" ? "#000000" : "#1a1a1a", backgroundColor: target === "button" ? "#d4af37" : "transparent" }])) as Record<TypographyTarget, TypographyStyle>;
+
+standardRouter.post("/create-order", async (req, res) => {
+  const input = z.object({
+    amount: z.number().int().min(100, "Amount must be at least 100 paise."),
+    currency: z.string().regex(/^[A-Z]{3}$/, "Currency must be a three-letter uppercase code.").default("INR"),
+    receipt: z.string().trim().min(1).max(40).optional(),
+  }).safeParse(req.body);
+  if (!input.success) return invalid(res, input.error.issues[0]?.message || "Invalid order request.");
+  try {
+    return res.status(201).json(await createStandardOrder(input.data));
+  } catch (error) {
+    return invalid(res, error instanceof Error ? error.message : "Unable to create Razorpay order.", error instanceof RazorpayError ? error.status : 502);
+  }
+});
+
+standardRouter.post("/verify-payment", async (req, res) => {
+  const input = z.object({
+    razorpay_order_id: z.string().trim().min(1),
+    razorpay_payment_id: z.string().trim().min(1),
+    razorpay_signature: z.string().regex(/^[a-f\d]{64}$/i, "Invalid payment signature."),
+  }).safeParse(req.body);
+  if (!input.success) return invalid(res, input.error.issues[0]?.message || "Payment verification fields are required.");
+  if (!verifyStandardPaymentSignature(input.data.razorpay_order_id, input.data.razorpay_payment_id, input.data.razorpay_signature))
+    return invalid(res, "Payment signature verification failed.", 400);
+  return res.json({ ok: true, payment_id: input.data.razorpay_payment_id, order_id: input.data.razorpay_order_id });
+});
 
 router.get("/:invoiceId/payments", async (req, res) => {
   const id = uuid.safeParse(req.params.invoiceId); if (!id.success) return invalid(res, "Invalid invoice id.");
@@ -130,5 +157,5 @@ webhookRouter.post("/", async (req: any, res) => {
   catch (error) { return invalid(res, error instanceof Error ? error.message : "Webhook processing failed.", error instanceof RazorpayError ? error.status : 500); }
 });
 
-export { webhookRouter };
+export { standardRouter, webhookRouter };
 export default router;

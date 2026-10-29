@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import Razorpay from "razorpay";
 import { transaction, type Db } from "../db/database.ts";
 
 const apiRoot = "https://api.razorpay.com/v1";
@@ -13,6 +14,33 @@ export function razorpayConfiguration() {
   return { configured: true, mode, problem: null };
 }
 export const razorpayConfigured = () => razorpayConfiguration().configured;
+
+export async function createStandardOrder(input: { amount: number; currency: string; receipt?: string }) {
+  const configuration = razorpayConfiguration();
+  if (!configuration.configured) throw new RazorpayError(configuration.problem || "Razorpay configuration is unavailable.", 503);
+  const { keyId, keySecret } = env();
+  try {
+    const razorpay = new Razorpay({ key_id: keyId!, key_secret: keySecret! });
+    const order = await razorpay.orders.create({
+      amount: input.amount,
+      currency: input.currency,
+      receipt: input.receipt,
+    });
+    return { order_id: order.id, amount: order.amount, currency: order.currency };
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status === 401) throw new RazorpayError("Razorpay authentication failed.", 401);
+    throw new RazorpayError(error instanceof Error ? error.message : "Unable to create Razorpay order.", status && status >= 400 && status < 500 ? status : 502);
+  }
+}
+
+export function verifyStandardPaymentSignature(orderId: string, paymentId: string, signature: string) {
+  const secret = env().keySecret;
+  if (!secret) return false;
+  const expected = createHmac("sha256", secret).update(`${orderId}|${paymentId}`).digest();
+  const received = Buffer.from(signature, "hex");
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
 
 export class RazorpayError extends Error {
   constructor(message: string, public readonly status = 502, public readonly uncertain = false) { super(message); }

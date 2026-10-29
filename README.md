@@ -336,6 +336,8 @@ Payment example:
 | `POST` | `/invoices/:id/payment-links/:linkId/cancel` | Cancel an open Razorpay link after confirmation so it cannot collect further payments. |
 | `POST` | `/invoices/:id/payment-status/refresh` | Fetch the stored Payment Links from Razorpay and reconcile individual payments. Temporary failures return `stale: true` without removing prior verified payments. |
 | `POST` | `/invoices/:id/send` | Generate the existing invoice PDF, attach it, and send through Gmail SMTP with a link; request an existing `payment_link_id` to resend without creating another link. |
+| `POST` | `/create-order` | Create a Standard Checkout Razorpay order from a server-validated paise amount (minimum 100 paise). Returns only the order ID, amount and currency. |
+| `POST` | `/verify-payment` | Verify `razorpay_order_id`, `razorpay_payment_id`, and `razorpay_signature` with the server-side HMAC secret. |
 | `POST` | `/webhooks/razorpay` | Raw-body HMAC verified webhook receiver with event-ID deduplication and retry of previously failed event processing. |
 
 For invoices linked to orders, payment creation also creates exactly one existing order payment and the invoice ledger entry references it. This endpoint and `/orders/:id/payments` use a transaction and reject repeat references, duplicate submission keys, and amounts beyond the remaining invoice/order balance. Order-linked invoices must equal the agreed order amount and cannot be discounted. Payments can be fully reversed with a reason through either the order or invoice payment history; a linked payment is reversed in both ledgers. The invoice list uses derived status; database status history stores only draft, issued, and void transitions. Invoice numbering is unique and generated in the server transaction by issue year.
@@ -350,6 +352,8 @@ Payment refunds are recorded separately and reduce the net paid balance without 
 
 Invoice details offer link creation, copy/open actions, gateway payment-attempt history, status refresh, and an invoice email action. It reuses a valid balance link or accepts a link ID on retry. The email service sends the existing snapshot-based invoice PDF as an actual attachment with the amounts, due date and hosted checkout URL. Delivery history records SMTP acceptance or failure. SMTP acceptance does not confirm recipient inbox delivery. A created payment link is retained if SMTP fails.
 
+Invoice details also offer **Pay with Razorpay**, which creates a Standard Checkout order for the current balance, opens the hosted modal, handles cancellation/failure events, and sends the successful callback fields to `/api/verify-payment`. The browser receives only `VITE_RAZORPAY_KEY_ID`; the key secret remains server-side.
+
 #### Test-mode setup
 
 1. Create or sign in to a Razorpay account and use its **Test Mode** dashboard to obtain test API Key ID and Key Secret. Do not use live credentials for local verification.
@@ -357,6 +361,7 @@ Invoice details offer link creation, copy/open actions, gateway payment-attempt 
 3. Restart with `npm run dev`, issue an invoice, and open its details. Select advance, flexible partial, or full balance; create a hosted test Payment Link and open it. Complete only a Razorpay test-mode payment.
 4. Use **Refresh status** in invoice details. It fetches the stored link and associated payments server-to-server. The UI reports the last successful reconciliation timestamp.
 5. Use **Send invoice PDF and payment link** only after configuring Gmail SMTP; it emails the attached PDF and current link to the client email on the issued invoice. Resending with an existing link does not create another link.
+6. To test Standard Checkout, issue an invoice with a balance of at least ₹1.00, open its details, select **Pay with Razorpay**, and complete a Test Mode payment. The app verifies the signature before reporting success.
 
 For hosted webhook use, configure `RAZORPAY_WEBHOOK_PUBLIC_URL` and the independent `RAZORPAY_WEBHOOK_SECRET`; register the HTTPS endpoint in the Razorpay dashboard for the same Test or Live mode and subscribe to the needed `payment_link.*`, `payment.*`, and `refund.processed` events. Razorpay sends the original JSON body and `X-Razorpay-Signature`; the app verifies HMAC-SHA256 against the raw body and deduplicates using `x-razorpay-event-id`. The receiver has a 256 KB payload limit and a dedicated rate limit. The webhook and health endpoints are public; the sign-in and session endpoints establish an HTTP-only, signed eight-hour session cookie, and business APIs require that session in production.
 

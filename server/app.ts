@@ -10,7 +10,7 @@ import { APP_SESSION_COOKIE, APP_SESSION_TTL_MS, appAuthIsConfigured, createAppS
 import emailRoutes from "./routes/email.routes.ts";
 import businessRoutes from "./routes/business.routes.ts";
 import invoiceRoutes from "./routes/invoice.routes.ts";
-import paymentRoutes, { webhookRouter } from "./routes/payment.routes.ts";
+import paymentRoutes, { standardRouter, webhookRouter } from "./routes/payment.routes.ts";
 
 export function createApp() {
   const app = express();
@@ -113,6 +113,7 @@ export function createApp() {
     return res.status(401).json({ error: "Your sign-in has expired. Please sign in again." });
   });
   app.use("/api/email", emailRoutes);
+  app.use("/api", standardRouter);
   app.use("/api/invoices", invoiceRoutes);
   app.use("/api/invoices", paymentRoutes);
   app.use("/api", businessRoutes);
