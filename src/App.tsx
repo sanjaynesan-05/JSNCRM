@@ -7,6 +7,7 @@ import {
   FileText,
   ReceiptText,
   LayoutDashboard,
+  LogOut,
   Mail,
   Menu,
   Settings,
@@ -20,6 +21,8 @@ import ProjectsPage from "./pages/ProjectsPage";
 import ClientsPage from "./pages/ClientsPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import BusinessProfileForm from "./components/BusinessProfileForm";
+import SignInPage from "./components/SignInPage";
+import { notifyAuthExpired } from "./services/api/authEvents";
 import logoUrl from "./assets/JSN DESIGN.png";
 import introVideoUrl from "./assets/logo reveal.mp4";
 
@@ -84,6 +87,7 @@ const pageCopy: Record<Page, { title: string; description: string }> = {
 };
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
+  notifyAuthExpired(response);
   const data = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new Error(data.error || `Request failed (${response.status})`);
@@ -97,6 +101,9 @@ const money = (minor: number) =>
   }).format(minor / 100);
 
 export default function App() {
+  const [authState, setAuthState] = useState<"checking" | "signed-in" | "signed-out">("checking");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
   const [showIntro, setShowIntro] = useState(() => {
     try {
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
@@ -122,11 +129,41 @@ export default function App() {
   const [quotationTarget, setQuotationTarget] = useState<string | null>(null);
   const [invoiceClient, setInvoiceClient] = useState<string | null>(null);
   const [invoiceTarget, setInvoiceTarget] = useState<string | null>(null);
+  const [invoiceQuotationTarget, setInvoiceQuotationTarget] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [gmail, setGmail] = useState<string | null>(null);
   const [gmailError, setGmailError] = useState(false);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/session", { credentials: "same-origin" })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Unable to check sign-in status.");
+        return data as { authenticated?: boolean; username?: string | null };
+      })
+      .then((data) => {
+        if (!active) return;
+        setAuthUsername(data.username || "");
+        setAuthState(data.authenticated ? "signed-in" : "signed-out");
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setAuthNotice(error instanceof Error ? error.message : "Unable to check sign-in status.");
+        setAuthState("signed-out");
+      });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    const expire = () => {
+      setAuthUsername("");
+      setAuthNotice("Your sign-in expired. Please sign in again.");
+      setAuthState("signed-out");
+    };
+    window.addEventListener("jsn-auth-expired", expire);
+    return () => window.removeEventListener("jsn-auth-expired", expire);
+  }, []);
   const closeIntro = () => {
     if (introFadeTimerRef.current !== null) window.clearTimeout(introFadeTimerRef.current);
     introFadeTimerRef.current = null;
@@ -138,7 +175,7 @@ export default function App() {
     introFadeTimerRef.current = window.setTimeout(closeIntro, 350);
   };
   useEffect(() => {
-    if (!showIntro) return;
+    if (!showIntro || authState !== "signed-in") return;
     const root = document.documentElement;
     const previousRootOverflow = root.style.overflow;
     const previousBodyOverflow = document.body.style.overflow;
@@ -158,7 +195,7 @@ export default function App() {
       root.style.overflow = previousRootOverflow;
       document.body.style.overflow = previousBodyOverflow;
     };
-  }, [showIntro]);
+  }, [showIntro, authState]);
   const navigate = (next: Page) => {
     setPage(next);
     setMobileOpen(false);
@@ -173,6 +210,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", pop);
   }, []);
   useEffect(() => {
+    if (authState !== "signed-in") return;
     setLoadError(null);
     if (page === "dashboard") {
       setLoading(true);
@@ -193,7 +231,16 @@ export default function App() {
           setGmailError(true);
         });
     }
-  }, [page]);
+  }, [page, authState]);
+  const signOut = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    } finally {
+      setAuthUsername("");
+      setAuthNotice("");
+      setAuthState("signed-out");
+    }
+  };
   const restore = async () => {
     if (!restoreFile) return;
     const data = new FormData();
@@ -271,7 +318,7 @@ export default function App() {
           onDefaultClientConsumed={() => setQuotationClient(null)}
           initialQuotationId={quotationTarget}
           onInitialQuotationConsumed={() => setQuotationTarget(null)}
-          onConverted={() => navigate("orders")}
+          onCreateInvoice={(id) => { setInvoiceQuotationTarget(id); navigate("invoices"); }}
           onEmailStudio={() => {
             toast("Attach the downloaded quotation PDF and review your email before sending.");
             navigate("email");
@@ -279,7 +326,7 @@ export default function App() {
         />
       );
     if (page === "invoices")
-      return <InvoicesPage defaultClientId={invoiceClient} onDefaultClientConsumed={()=>setInvoiceClient(null)} initialInvoiceId={invoiceTarget} onInitialInvoiceConsumed={()=>setInvoiceTarget(null)} onEmailStudio={() => { toast("Download the invoice PDF, attach it in Email Studio, and review before sending."); navigate("email"); }} />;
+      return <InvoicesPage defaultClientId={invoiceClient} onDefaultClientConsumed={()=>setInvoiceClient(null)} initialInvoiceId={invoiceTarget} onInitialInvoiceConsumed={()=>setInvoiceTarget(null)} initialQuotationId={invoiceQuotationTarget} onInitialQuotationConsumed={()=>setInvoiceQuotationTarget(null)} onEmailStudio={() => { toast("Download the invoice PDF, attach it in Email Studio, and review before sending."); navigate("email"); }} />;
     if (page === "orders")
       return <ProjectsPage onClients={(id) => { setClientTarget(id || null); navigate("clients"); }} />;
     return (
@@ -337,6 +384,16 @@ export default function App() {
       </>
     );
   };
+  if (authState === "checking") {
+    return <main className="signin-loading" aria-live="polite"><img src={logoUrl} alt="" /><span>Opening your workspace…</span></main>;
+  }
+  if (authState === "signed-out") {
+    return <SignInPage initialMessage={authNotice} onAuthenticated={(username) => {
+      setAuthNotice("");
+      setAuthUsername(username);
+      setAuthState("signed-in");
+    }} />;
+  }
   const active = nav.find((n) => n.id === page)!;
   return (
     <div
@@ -380,7 +437,7 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <span className="local-indicator" /> Local workspace
+          <span className="local-indicator" /> Private workspace
         </div>
       </aside>
       <div className="business-main">
@@ -403,7 +460,10 @@ export default function App() {
             JSN DESIGNS <ChevronRight size={13} />
             <span>{active.label}</span>
           </div>
-          <span className="secure-local">LOCAL DATA</span>
+          <span className="secure-local">SECURE WORKSPACE</span>
+          <button className="workspace-signout" onClick={signOut} title={`Sign out${authUsername ? ` ${authUsername}` : ""}`}>
+            <LogOut size={15} /><span>Sign out</span>
+          </button>
         </header>
         <main
           className={`business-content ${page === "email" ? "email-content" : ""}`}

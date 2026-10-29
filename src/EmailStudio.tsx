@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { generateEmailHtml } from "./services/html.service";
+import { notifyAuthExpired } from "./services/api/authEvents";
 import type {
   AttachmentItem,
   EmailDraft,
@@ -132,6 +133,16 @@ const initialDraft: EmailDraft = {
   ],
   closing: "Warmly,",
   signature: "JSN Designs\njsndesigns.com",
+  recipientName: "",
+  companyName: "",
+  documentReference: "",
+  issueDate: "",
+  attachmentName: "",
+  senderName: "",
+  businessName: "JSN DESIGNS",
+  businessDescription: "Creative Design & Branding Solutions",
+  businessContact: "",
+  footerContent: "",
   ctaLabel: "",
   ctaUrl: "",
   template: "professional",
@@ -203,7 +214,7 @@ export default function EmailStudio() {
   }, [draft]);
   useEffect(() => {
     fetch("/api/email/config")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => { notifyAuthExpired(r); return r.ok ? r.json() : null; })
       .then((d) => d?.gmailUser && setAccount(d.gmailUser))
       .catch(() => undefined);
   }, []);
@@ -295,6 +306,7 @@ export default function EmailStudio() {
         method: "POST",
         body: data,
       });
+      notifyAuthExpired(response);
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to send email");
       const timestamp = new Date().toLocaleString([], {
@@ -450,6 +462,16 @@ export default function EmailStudio() {
             </div>
           </Panel>
 
+          <Panel title="Document details" kicker="Optional">
+            <div className="field-grid">
+              <Field label="Recipient name" value={draft.recipientName || ""} onChange={(v) => update("recipientName", v)} />
+              <Field label="Company name" value={draft.companyName || ""} onChange={(v) => update("companyName", v)} />
+              <Field label="Reference number" value={draft.documentReference || ""} onChange={(v) => update("documentReference", v)} />
+              <Field label="Issue date" value={draft.issueDate || ""} onChange={(v) => update("issueDate", v)} />
+              <Field label="Attachment label" value={draft.attachmentName || ""} placeholder="Added automatically when files are attached" onChange={(v) => update("attachmentName", v)} full />
+            </div>
+          </Panel>
+
           {/* Sections */}
           <Panel
             title="Sections"
@@ -498,6 +520,12 @@ export default function EmailStudio() {
                 onChange={(v) => update("signature", v)}
                 rows={2}
               />
+              <div className="field-grid">
+                <Field label="Sender name" value={draft.senderName || ""} onChange={(v) => update("senderName", v)} />
+                <Field label="Business name" value={draft.businessName || ""} onChange={(v) => update("businessName", v)} />
+                <Field label="Business description" value={draft.businessDescription || ""} onChange={(v) => update("businessDescription", v)} />
+                <Field label="Business contact" value={draft.businessContact || ""} placeholder="Optional verified contact details" onChange={(v) => update("businessContact", v)} />
+              </div>
             </div>
             <div className="cta-row">
               <div className="cta-heading">

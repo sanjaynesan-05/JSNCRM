@@ -56,14 +56,23 @@ Copy `.env.example` to `.env`. Values are read by the backend at startup.
 | `GMAIL_APP_PASSWORD` | Empty                                                                   | Gmail App Password used by Nodemailer. It is never sent to the browser.  |
 | `SMTP_PORT`          | `587`                                                                   | SMTP TCP port. Uses STARTTLS on 587; set `465` for implicit TLS.          |
 | `PORT`               | `5000`                                                                  | Express API port.                                                        |
-| `HOST`               | `127.0.0.1`                                                             | Express bind host. Only loopback addresses are accepted because the app has no sign-in. |
+| `HOST`               | `127.0.0.1`                                                             | Express bind host. Use `0.0.0.0` on a hosted service; production requires app sign-in credentials. |
 | `CLIENT_URL`         | `http://localhost:5173`                                                 | Browser origin permitted by CORS and state-changing request checks.      |
+| `APP_USERNAME`       | Empty                                                                   | Username shown on the hosted app sign-in screen. Required in production. |
+| `APP_PASSWORD`       | Empty                                                                   | Hosted app sign-in password, at least 16 characters. Required in production. |
 | `DATABASE_PATH`      | `%LOCALAPPDATA%\JSN Designs Business Studio\business.sqlite` on Windows | SQLite database file. Set an absolute path if you want another location. |
+| `DATABASE_URL`       | Empty                                                                   | Optional Neon PostgreSQL connection string. When set, PostgreSQL is used instead of SQLite. Keep the URL server-side. |
 | `BACKUP_DIR`         | `%LOCALAPPDATA%\JSN Designs Business Studio\backups` on Windows         | Folder for generated backup snapshots.                                   |
+| `RAZORPAY_KEY_ID` | Empty | Server-only Razorpay key ID. Use a test-mode key for development. |
+| `RAZORPAY_KEY_SECRET` | Empty | Server-only Razorpay API secret. Never add it to Vite/client variables. |
+| `RAZORPAY_WEBHOOK_SECRET` | Empty | Independent signing secret configured for Razorpay webhook verification. |
+| `RAZORPAY_MODE` | `test` | Explicit mode label; the app never switches to live automatically. |
+| `RAZORPAY_WEBHOOK_PUBLIC_URL` | Empty | Optional HTTPS webhook URL for a hosted deployment. |
+| `APP_BASE_URL` | `http://localhost:5173` | Application URL placeholder for deployment configuration. |
 
 On systems without `LOCALAPPDATA` or `APPDATA`, the database and backup folders default to `JSN Designs Business Studio` under the current working directory. The restore upload staging directory also lives under the local application data folder (or current working directory fallback). Database files are kept outside frontend source, public assets, and generated frontend bundles.
 
-Restart the API after changing `.env`. Do not put secrets in `VITE_` variables: Vite variables are available to frontend code.
+Restart the API after changing `.env`. Do not put secrets in `VITE_` variables: Vite variables are available to frontend code. Payment workflows remain disabled until both Razorpay API credentials are configured.
 
 ## Application guide
 
@@ -73,7 +82,7 @@ The sidebar provides Dashboard, Email Studio, Quotations, Invoices, Orders & Pro
 
 Dashboard values come from SQLite queries. It shows active client count, draft/sent quotation count, active order count, open task count, outstanding order balances, and up to five upcoming open tasks. A new database displays zero counts and an honest empty task state; no sample revenue, orders, or clients are fabricated.
 
-The dashboard also shows open and overdue invoice counts and links to the invoice list. It deliberately does not add invoice money to the existing order-balance figure.
+The dashboard also shows open and overdue invoice counts and links to the invoice list. It deliberately does not add invoice money to the existing order-balance figure. Queries use the configured SQLite or PostgreSQL database.
 
 ### Email Studio
 
@@ -107,7 +116,7 @@ Quotation dashboard amounts show the total value of displayed quotations; accept
 
 The Invoices screen supports direct draft invoices and confirmed creation from accepted quotations or orders. A source can have one non-void invoice; orders converted from a quotation keep both source links, and the same source cannot be invoiced once through the quote and again through the order. Drafts can be edited; issuing stores client and business contact snapshots, locks commercial fields, and adds a status-history record. An issued invoice may be voided only before payment; a void invoice can produce a linked reissue draft. Paid and outstanding states are derived from persisted payments and due dates. Invoice numbers are allocated transactionally in `INV-YYYY-NNNN` form using the issue year.
 
-All invoice values currently use INR paise. Tax is not calculated and this is a non-GST baseline; GST registration, place-of-supply, rate, and tax breakdown requirements have not been established. Payment instructions are not yet configurable separately from invoice terms. Invoice PDFs are generated from persisted items and the issue-time client/business snapshots, contain totals, amount paid, balance due, and terms, and do not mutate invoice state. Complex-script PDF shaping remains unsupported. Download the PDF and attach/review it manually in Email Studio; no invoice email is sent automatically.
+All invoice values currently use INR paise. Tax is not calculated and this is a non-GST baseline; GST registration, place-of-supply, rate, and tax breakdown requirements have not been established. Invoice PDFs are generated from persisted items and the issue-time client/business snapshots, contain totals, amount paid, balance due, and terms, and do not mutate invoice state. Complex-script PDF shaping remains unsupported. Users can download the PDF for manual handling or use the invoice payment-email action to attach it and send it through configured Gmail SMTP.
 
 PDF rendering investigation: PDFKit can embed TTF/TTC fonts and the installed Fontkit dependency contains Indic shaping paths for Tamil and Devanagari. The current PDF services still replace non-Latin characters and use standard fonts, so that capability is not enabled or claimed. A follow-up should prototype licensed Noto fonts and verify visual output, wrapping, and extracted text before support is enabled. See [PDFKit font embedding](https://pdfkit.org/docs/text.html), [Fontkit shaping source](https://github.com/foliojs/fontkit/tree/master/src/opentype/shapers), and [HarfBuzz script coverage](https://harfbuzz.github.io/what-does-harfbuzz-do.html).
 
@@ -119,7 +128,7 @@ The Orders & Projects screen creates direct orders, updates order status and del
 
 ### Settings
 
-Settings reports whether Gmail is configured without disclosing its password. It provides a database backup download and a restore upload. The database path can be changed with `DATABASE_PATH` in `.env`.
+Settings reports whether Gmail is configured without disclosing its password. It provides a database backup download and a restore upload. SQLite mode downloads a SQLite file; PostgreSQL mode downloads a JSON snapshot. The database path can be changed with `DATABASE_PATH` in `.env`.
 
 ## Architecture
 
@@ -144,7 +153,9 @@ src/
 server/
   index.ts                        Environment loading, database initialization and listener
   app.ts                          Express middleware and route registration
-  db/database.ts                  SQLite setup, migrations and restore operations
+  db/database.ts                  Database selection, SQLite setup and migrations
+  db/postgres.ts                  PostgreSQL pool, transactions and snapshots
+  db/postgres-migrations/         Versioned PostgreSQL schema migrations
   db/migrations/001_initial.sql   Initial versioned schema
   schemas/business.ts             Zod validation schemas
   routes/email.routes.ts          Existing email API with runtime payload validation
@@ -159,11 +170,13 @@ server/
   invoice.test.ts                  Invoice API lifecycle/accounting regression tests
 ```
 
-Frontend components call typed local API helpers and do not run SQL. The server uses parameterized SQL through `better-sqlite3`. Express middleware includes Helmet, CORS, rate limiting, and Origin/Host checks for state-changing methods. Zod validates untrusted business and email request payloads.
+Frontend components call typed local API helpers and do not run SQL. The server uses parameterized SQL through `better-sqlite3` for local SQLite mode and `pg` for PostgreSQL mode. Set `DATABASE_URL` to use PostgreSQL; server startup applies its numbered migrations before accepting requests. Express middleware includes Helmet, CORS, rate limiting, and Origin/Host checks for state-changing methods. Zod validates untrusted business and email request payloads.
 
 ## Database and business rules
 
-The SQLite file is local and is never placed in `public/`, `src/`, or `dist/`. At startup the server creates the parent directory, enables foreign keys, uses WAL journaling and a five-second busy timeout, applies any pending versioned migrations, then checks SQLite and foreign-key integrity before listening. Migration versions and application timestamps are stored in `schema_migrations`. Migrations are additive/versioned; startup does not reset existing data.
+The SQLite file is local and is never placed in `public/`, `src/`, or `dist/`. In SQLite mode, startup creates the parent directory, enables foreign keys, uses WAL journaling and a five-second busy timeout, applies pending migrations, then checks SQLite and foreign-key integrity before listening. PostgreSQL mode uses a connection pool and applies its matching versioned migrations before listening. Both modes store migration versions in `schema_migrations`; startup does not reset existing data.
+
+To copy a local SQLite database into an empty PostgreSQL database, set `SQLITE_SOURCE` to the SQLite file path and `DATABASE_URL` to the destination connection string, then run `npm run migrate:sqlite-to-postgres`. The importer takes a consistent temporary SQLite backup, preserves row IDs and related records, verifies per-table row counts, and leaves the source untouched. It refuses to import if the destination already contains business data.
 
 Migration **001** creates the core business tables. Migration **002** adds quotation lifecycle history and the single-row business profile. Startup applies pending numbered migrations to fresh and existing databases:
 
@@ -318,10 +331,42 @@ Payment example:
 | `POST` | `/invoices/:id/payments` | Record an issued invoice payment; requires `amount_minor`, `payment_date`, and a UUID `idempotency_key`. |
 | `POST` | `/invoices/:id/payments/:paymentId/reverse` | Reverse a full payment with a required reason; linked order and invoice balances update together. |
 | `GET` | `/invoices/:id/pdf` | Download a PDF from persisted invoice data and issue snapshots; drafts have no customer PDF. |
+| `GET` | `/invoices/:id/payments` | Verified payment summary, refunds, gateway links/attempts, email history and latest verification time. |
+| `POST` | `/invoices/:id/payment-links` | Create or reuse an advance, balance, or flexible partial Razorpay Payment Link. Amounts are computed/validated against the current server-side balance. |
+| `POST` | `/invoices/:id/payment-links/:linkId/cancel` | Cancel an open Razorpay link after confirmation so it cannot collect further payments. |
+| `POST` | `/invoices/:id/payment-status/refresh` | Fetch the stored Payment Links from Razorpay and reconcile individual payments. Temporary failures return `stale: true` without removing prior verified payments. |
+| `POST` | `/invoices/:id/send` | Generate the existing invoice PDF, attach it, and send through Gmail SMTP with a link; request an existing `payment_link_id` to resend without creating another link. |
+| `POST` | `/webhooks/razorpay` | Raw-body HMAC verified webhook receiver with event-ID deduplication and retry of previously failed event processing. |
 
 For invoices linked to orders, payment creation also creates exactly one existing order payment and the invoice ledger entry references it. This endpoint and `/orders/:id/payments` use a transaction and reject repeat references, duplicate submission keys, and amounts beyond the remaining invoice/order balance. Order-linked invoices must equal the agreed order amount and cannot be discounted. Payments can be fully reversed with a reason through either the order or invoice payment history; a linked payment is reversed in both ledgers. The invoice list uses derived status; database status history stores only draft, issued, and void transitions. Invoice numbering is unique and generated in the server transaction by issue year.
 
 This records ₹500.00. Payments inherit the order currency; this milestone defaults to INR.
+
+### Razorpay payment collection and invoice email
+
+Payment collection uses Razorpay's standard hosted Payment Links API. The server stores link references, gateway payment attempts and successful captured payments in the existing `invoice_payments` ledger. Only server-to-server fetched `captured` payment records increase paid totals; browser redirects and failed/authorized attempts do not. Link creation supports a fixed advance, the full outstanding balance, or flexible partial payments (`accept_partial` with a minimum of ₹1.00). Payment Links do not carry a UPI-only restriction; UPI, cards and net banking availability depends on the Razorpay merchant account and its enabled methods. Partial payments use the standard link because UPI-only links do not support the needed partial-payment behavior.
+
+Payment refunds are recorded separately and reduce the net paid balance without deleting the successful payment. The current integration consumes processed refund webhook records; refund initiation remains in Razorpay Dashboard and is not exposed as an application action. Existing manual invoice receipt and reversal workflows are retained.
+
+Invoice details offer link creation, copy/open actions, gateway payment-attempt history, status refresh, and an invoice email action. It reuses a valid balance link or accepts a link ID on retry. The email service sends the existing snapshot-based invoice PDF as an actual attachment with the amounts, due date and hosted checkout URL. Delivery history records SMTP acceptance or failure. SMTP acceptance does not confirm recipient inbox delivery. A created payment link is retained if SMTP fails.
+
+#### Test-mode setup
+
+1. Create or sign in to a Razorpay account and use its **Test Mode** dashboard to obtain test API Key ID and Key Secret. Do not use live credentials for local verification.
+2. Copy `.env.example` to `.env` if it does not exist and set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_MODE=test` locally. Keep `.env` untracked. Keep SMTP values separate and optional until you intend to send a real email.
+3. Restart with `npm run dev`, issue an invoice, and open its details. Select advance, flexible partial, or full balance; create a hosted test Payment Link and open it. Complete only a Razorpay test-mode payment.
+4. Use **Refresh status** in invoice details. It fetches the stored link and associated payments server-to-server. The UI reports the last successful reconciliation timestamp.
+5. Use **Send invoice PDF and payment link** only after configuring Gmail SMTP; it emails the attached PDF and current link to the client email on the issued invoice. Resending with an existing link does not create another link.
+
+For hosted webhook use, configure `RAZORPAY_WEBHOOK_PUBLIC_URL` and the independent `RAZORPAY_WEBHOOK_SECRET`; register the HTTPS endpoint in the Razorpay dashboard for the same Test or Live mode and subscribe to the needed `payment_link.*`, `payment.*`, and `refund.processed` events. Razorpay sends the original JSON body and `X-Razorpay-Signature`; the app verifies HMAC-SHA256 against the raw body and deduplicates using `x-razorpay-event-id`. The receiver has a 256 KB payload limit and a dedicated rate limit. The webhook and health endpoints are public; the sign-in and session endpoints establish an HTTP-only, signed eight-hour session cookie, and business APIs require that session in production.
+
+The app does not silently switch to live mode. Live mode requires the merchant's live API keys, a production review, a secured deployment, HTTPS webhook configuration and merchant-account enablement for each desired payment method. Razorpay's API accepts `expire_by` as Unix epoch seconds; it is optional here, but if supplied it must be at least 15 minutes in the future. Link creation timeouts are marked uncertain; refresh searches Razorpay by the saved `reference_id` before any retry, so a late-created link is recovered without creating a duplicate. If Razorpay or SMTP returns an error, the invoice screen reports it and the event/delivery ledger preserves the failure for diagnosis.
+
+#### Render deployment
+
+This service serves the production Vite build and API from one origin. Use Build Command `npm ci && npm run build`, Start Command `npm run start`, and health check path `/healthz`. Set `NODE_ENV=production`, `HOST=0.0.0.0`, `CLIENT_URL=https://<your-render-service>.onrender.com`, `APP_USERNAME`, and a unique `APP_PASSWORD` of at least 16 characters. Render supplies `PORT`; do not hard-code it. Set `DATABASE_URL` to the Neon pooled PostgreSQL connection string. Configure `RAZORPAY_MODE=test`, test API keys, and a separate webhook secret first. Set `RAZORPAY_WEBHOOK_PUBLIC_URL=https://<your-render-service>.onrender.com/api/webhooks/razorpay`, then register that HTTPS endpoint in Razorpay Test Mode. The webhook and health endpoints are public; business APIs require a signed session created by the app sign-in screen. Switch to live credentials only after test payments, reconciliation and webhook delivery work.
+
+Migration 005 adds gateway link/attempt/refund/event and invoice email delivery tables plus nullable gateway IDs on `invoice_payments`. Existing backups continue to include these tables; old supported backups migrate forward when restored. Take a private database backup before production upgrade and verify that the restored schema reaches migration 005.
 
 ### Backups and email
 
@@ -346,14 +391,14 @@ Restore accepts backups produced with this schema version. Restoring an older ba
 
 ## Security and privacy
 
-- Express accepts only IPv4/IPv6 loopback bind addresses and Vite binds its local development server. The application has no authentication, user accounts, or authorization model; setting `HOST` to a network-facing address stops the API from starting.
-- CORS is limited to `CLIENT_URL`; state-changing requests validate supplied Origin and loopback Host values. Helmet security headers and a 60-request-per-15-minute rate limit are enabled.
+- Local development defaults to an IPv4 loopback bind; hosted deployments may bind to `0.0.0.0` or `::`. Production startup requires `APP_USERNAME` and an `APP_PASSWORD` of at least 16 characters. The sign-in screen posts credentials over HTTPS, then uses an HTTP-only, SameSite=Strict, signed session cookie with an eight-hour lifetime. The password is not stored in the browser. Rotate the app password to invalidate active sessions.
+- CORS is limited to the configured client origin and, on Render, its service origin; state-changing requests validate supplied Origin and Host values. Helmet security headers and a 60-request-per-15-minute rate limit are enabled. The signed Razorpay webhook is separately verified and remains reachable without app credentials.
 - On 2026-10-09, `npm audit` reported 7 development-tree findings (5 high, 2 moderate); `npm audit --omit=dev` reported 0 production findings. Affected packages are `tailwindcss`, `braces`, `chokidar`, `fast-glob`, `micromatch`, `postcss-nested`, and `postcss-selector-parser`. The current Tailwind 3.4.19 range is affected; npm proposes Tailwind 4.3.3, a major upgrade. This audit was not force-fixed because Tailwind 4 requires build configuration and CSS compatibility work. Re-run both audit commands before release.
 - SQL values are passed as parameters. Business request bodies are validated at runtime. Database files and backups are not served by Vite.
 - Gmail credentials stay in the backend environment. Email attachment bytes are held in memory for the request and are not kept as a permanent upload archive.
 - `.env`, SQLite/database files, backup files, and upload data are excluded by `.gitignore`. Check the ignore rules before storing any custom data path inside the repository.
 
-This app is designed for one trusted local user. Loopback binding is not a substitute for authentication or operating-system account security. Do not change `HOST` to a network-facing address or expose the API to an untrusted network. Do not commit or share database backups casually.
+This app is designed for one trusted user. Hosted deployments must use HTTPS, a strong private app password, and private database storage. Do not expose database backups. Sign-in is a single-user access gate, not a multi-user role or permission system.
 
 ## Build and tests
 
@@ -419,4 +464,4 @@ Choose a complete SQLite backup generated by this application. A renamed file is
 
 ## Future scope
 
-Potential follow-on work includes direct attachment handoff from quotation details to Email Studio and configurable logo asset management. Tax calculation, user authentication, and multi-user deployment are not implemented.
+Potential follow-on work includes direct attachment handoff from quotation details to Email Studio and configurable logo asset management. Tax calculation and multi-user roles are not implemented.

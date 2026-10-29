@@ -81,6 +81,16 @@ export type EmailDraft = {
   ctaUrl: string;
   template: TemplateId;
   typography: Record<TypographyTarget, TypographyStyle>;
+  recipientName?: string;
+  companyName?: string;
+  documentReference?: string;
+  issueDate?: string;
+  attachmentName?: string;
+  senderName?: string;
+  businessName?: string;
+  businessDescription?: string;
+  businessContact?: string;
+  footerContent?: string;
 };
 
 export type AttachmentItem = { id: string; file: File };

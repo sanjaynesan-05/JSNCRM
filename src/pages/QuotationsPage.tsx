@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Copy, Download, Eye, FilePlus2, Minus, Plus, Save, Search, X } from "lucide-react";
+import { ArrowRight, Copy, Download, Eye, FilePlus2, Minus, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, jsonRequest } from "../services/api/apiClient";
+import { notifyAuthExpired } from "../services/api/authEvents";
 import type {
   Client,
   Quotation,
@@ -56,7 +57,7 @@ const itemAmount = (item: ItemDraft) =>
 
 export default function QuotationsPage({
   onClients,
-  onConverted,
+  onCreateInvoice,
   onEmailStudio,
   defaultClientId,
   onDefaultClientConsumed,
@@ -64,7 +65,7 @@ export default function QuotationsPage({
   onInitialQuotationConsumed,
 }: {
   onClients: (clientId?: string) => void;
-  onConverted: () => void;
+  onCreateInvoice: (quotationId: string) => void;
   onEmailStudio: () => void;
   defaultClientId?: string | null;
   onDefaultClientConsumed?: () => void;
@@ -221,16 +222,24 @@ export default function QuotationsPage({
       );
     }
   };
-  const convert = async (quote: Quotation) => {
-    try {
-      await api(`/api/quotations/${quote.id}/convert`, jsonRequest("POST", {}));
-      toast.success("Accepted quotation converted to an order.");
-      onConverted();
-    } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Unable to convert quotation.",
-      );
+  const deleteQuotation = async (quote: Quotation) => {
+    if (quote.converted_order_id || quote.converted_invoice_id) {
+      toast.error("This quotation cannot be deleted because it is linked to an order or invoice.");
+      return;
     }
+    if (!window.confirm(`Delete quotation ${quote.quotation_number}? This action cannot be undone.`)) return;
+    try {
+      await api(`/api/quotations/${quote.id}`, { method: "DELETE" });
+      if (details?.id === quote.id) setDetails(null);
+      toast.success("Quotation deleted.");
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Unable to delete quotation.");
+    }
+  };
+  const convert = async (quote: Quotation) => {
+    if (quote.status !== "accepted" || quote.converted_order_id || quote.converted_invoice_id) return;
+    onCreateInvoice(quote.id);
   };
   const duplicate = async (quote: Quotation) => {
     try {
@@ -244,6 +253,7 @@ export default function QuotationsPage({
     setPdfLoadingId(quote.id);
     try {
       const response = await fetch(`/api/quotations/${quote.id}/pdf`);
+      notifyAuthExpired(response);
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || `PDF download failed (${response.status}).`);
@@ -343,6 +353,7 @@ export default function QuotationsPage({
                       </button>
                       <button className="icon-action" title="Duplicate as draft" aria-label={`Duplicate ${q.quotation_number}`} onClick={()=>void duplicate(q)}><Copy size={15}/></button>
                       <button className="icon-action" title="Download quotation PDF" aria-label={`Download PDF for ${q.quotation_number}`} disabled={Boolean(pdfLoadingId)} onClick={()=>void downloadPdf(q)}><Download size={15}/></button>
+                      <button className="icon-action" title="Delete quotation" aria-label={`Delete ${q.quotation_number}`} disabled={Boolean(q.converted_order_id || q.converted_invoice_id)} onClick={() => void deleteQuotation(q)}><Trash2 size={15}/></button>
                       <button
                         className="icon-action"
                         title="Edit quotation"
@@ -351,10 +362,10 @@ export default function QuotationsPage({
                       >
                         <FilePlus2 size={15} />
                       </button>
-                      {q.status === "accepted" && !q.converted_order_id && (
+                      {q.status === "accepted" && !q.converted_order_id && !q.converted_invoice_id && (
                         <button
                           className="icon-action convert-action"
-                          title="Convert to order"
+                          title="Create invoice"
                           onClick={() => void convert(q)}
                         >
                           <ArrowRight size={15} />
@@ -737,7 +748,9 @@ export default function QuotationsPage({
                 Close
               </button>
               <button className="secondary-button" disabled={Boolean(pdfLoadingId)} onClick={()=>void downloadPdf(details)}><Download size={14}/>{pdfLoadingId===details.id ? "Preparing PDF…" : "Download PDF"}</button>
+              {!details.converted_order_id && !details.converted_invoice_id && <button className="secondary-button" onClick={() => void deleteQuotation(details)}><Trash2 size={14}/>Delete quotation</button>}
               {downloadedPdfId===details.id && <button className="studio-button" onClick={onEmailStudio}>Open Email Studio</button>}
+              {details.status === "accepted" && !details.converted_order_id && !details.converted_invoice_id && <button className="studio-button" onClick={() => onCreateInvoice(details.id)}>Create invoice</button>}
             </footer>
           </section>
         </div>

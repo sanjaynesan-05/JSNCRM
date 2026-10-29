@@ -45,6 +45,11 @@ a { color: var(--brand-black); text-underline-offset: 3px; }
 .topbar-context { color: var(--brand-gray); font-size: 12px; }
 .topbar-context span { color: var(--brand-black); font-weight: 700; }
 .secure-local { color: var(--brand-dark); background: var(--brand-white); border: 1px solid var(--brand-gold); border-radius: 2px; font: 650 10px "Proxima Nova", Arial, sans-serif; letter-spacing: 1.2px; }
+.workspace-signout { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 11px; border: 1px solid var(--line); border-radius: 2px; color: var(--brand-dark); background: var(--brand-white); font-size: 11px; font-weight: 600; }
+.workspace-signout:hover { border-color: var(--brand-gold); background: var(--brand-light); }
+.workspace-signout svg { color: #9a7b1c; }
+.signin-loading { display: flex; min-height: 100vh; align-items: center; justify-content: center; flex-direction: column; gap: 18px; color: var(--brand-gray); background: var(--brand-light); font-size: 13px; }
+.signin-loading img { width: 72px; height: 60px; padding: 5px; object-fit: contain; border: 1px solid var(--line); background: #fff; }
 .business-content { max-width: 1480px; padding: clamp(26px, 4vw, 52px) clamp(18px, 4vw, 58px) 76px; }
 .business-page-heading { margin-bottom: 30px; padding-bottom: 18px; border-bottom: 1px solid var(--brand-gold); }
 .business-eyebrow { color: var(--brand-gray); font: 600 10px "Proxima Nova", Arial, sans-serif; letter-spacing: 1.7px; }

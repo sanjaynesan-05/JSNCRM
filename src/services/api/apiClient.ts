@@ -1,3 +1,5 @@
+import { notifyAuthExpired } from "./authEvents";
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -7,6 +9,7 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
       "The local API is unavailable. Check that the server is running.",
     );
   }
+  notifyAuthExpired(response);
   const data = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new Error(data.error || `Request failed (${response.status})`);
