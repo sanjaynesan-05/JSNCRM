@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.env
+.env.*
+!.env.example
+tmp
+uploads
+backups
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
